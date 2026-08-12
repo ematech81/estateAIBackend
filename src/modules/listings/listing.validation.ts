@@ -50,3 +50,14 @@ export type CreateListingInput = z.infer<typeof createListingSchema>;
 
 export const updateListingSchema = createListingSchema.partial();
 export type UpdateListingInput = z.infer<typeof updateListingSchema>;
+
+// Public search — deliberately loose (plain text/city match, not the AI
+// relevance-ranking "matching engine" described in Section 9 of the master
+// build prompt, which isn't built yet). Query params only, so everything
+// coerces from strings.
+export const searchListingsSchema = z.object({
+  q: z.string().trim().min(1).optional(),
+  city: z.string().trim().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(24).default(12),
+});
+export type SearchListingsInput = z.infer<typeof searchListingsSchema>;

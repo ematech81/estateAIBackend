@@ -2,13 +2,25 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { ApiError } from '../../utils/ApiError';
 import { extractListingDraft } from '../../services/ai/extraction.service';
-import { createListing, getMyListings, updateListing } from './listing.service';
-import { createListingSchema, draftRequestSchema, updateListingSchema } from './listing.validation';
+import { createListing, getMyListings, searchListings, updateListing } from './listing.service';
+import {
+  createListingSchema,
+  draftRequestSchema,
+  searchListingsSchema,
+  updateListingSchema,
+} from './listing.validation';
 
 export const generateDraft = asyncHandler(async (req: Request, res: Response) => {
   const { text } = draftRequestSchema.parse(req.body);
   const draft = await extractListingDraft(text);
   res.status(200).json({ draft });
+});
+
+// Public — no auth. Registered before requireAuth in listing.routes.ts.
+export const search = asyncHandler(async (req: Request, res: Response) => {
+  const input = searchListingsSchema.parse(req.query);
+  const listings = await searchListings(input);
+  res.status(200).json({ listings });
 });
 
 export const create = asyncHandler(async (req: Request, res: Response) => {
