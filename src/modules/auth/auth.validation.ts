@@ -7,6 +7,7 @@ export const registerSchema = z.object({
   role: z.enum(['agent', 'agency', 'owner']), // admin accounts are not self-registrable
   phone: z.string().min(7).optional(),
   businessName: z.string().min(2).optional(),
+  primaryLocation: z.string().min(2).optional(),
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
 

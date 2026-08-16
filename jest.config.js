@@ -5,5 +5,7 @@ module.exports = {
   rootDir: '.',
   testMatch: ['<rootDir>/tests/**/*.test.ts'],
   setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
-  testTimeout: 30000,
+  // Generous enough to cover MongoMemoryServer's launchTimeout (60s, see
+  // tests/helpers/testDb.ts) plus the test body itself.
+  testTimeout: 90000,
 };

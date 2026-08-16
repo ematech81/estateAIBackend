@@ -1,4 +1,4 @@
-import { Types } from 'mongoose';
+import { Types, isValidObjectId } from 'mongoose';
 import { Property } from '../../models/Property';
 import { ApiError } from '../../utils/ApiError';
 import { CreateListingInput, SearchListingsInput, UpdateListingInput } from './listing.validation';
@@ -7,12 +7,27 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+// Shared by searchListings and getListingById — strips createdBy down to
+// the one derived boolean the UI needs (Section 13.5: never expose
+// sensitive agent/user info unnecessarily).
+type WithPopulatedCreator = { createdBy: unknown; toObject: () => Record<string, unknown> };
+function toPublicListing(listing: WithPopulatedCreator) {
+  const { createdBy, ...rest } = listing.toObject();
+  const agentVerified =
+    (createdBy as { verificationStatus?: string } | undefined)?.verificationStatus === 'verified';
+  return { ...rest, agentVerified };
+}
+
 export async function createListing(userId: string, input: CreateListingInput) {
   return Property.create({
     ...input,
     source: 'internal',
     createdBy: new Types.ObjectId(userId),
-    status: 'pending_review',
+    // No moderation queue exists yet — publish straight to 'active' rather
+    // than sitting in a misleading "pending_review" that nothing ever
+    // reviews. Revert to 'pending_review' once the admin approval flow
+    // (Section 10) is built, so it means something again.
+    status: 'active',
   });
 }
 
@@ -44,12 +59,28 @@ export async function searchListings({ q, city, limit }: SearchListingsInput) {
     // (Section 13.5: never expose sensitive agent/user info unnecessarily).
     .populate<{ createdBy: { verificationStatus: string } }>('createdBy', 'verificationStatus');
 
-  return listings.map((listing) => {
-    const { createdBy, ...rest } = listing.toObject();
-    const agentVerified =
-      (createdBy as unknown as { verificationStatus?: string })?.verificationStatus === 'verified';
-    return { ...rest, agentVerified };
-  });
+  return listings.map(toPublicListing);
+}
+
+// Public single-listing fetch — same visibility rule as search (only
+// pending_review/active), so a draft can't be viewed just by guessing its id.
+export async function getListingById(id: string) {
+  // A public route gets hit with arbitrary garbage in the URL far more than
+  // the auth-gated ones — a malformed id should 404, not fall through to a
+  // Mongoose CastError and a generic 500.
+  if (!isValidObjectId(id)) {
+    throw ApiError.notFound('Listing not found');
+  }
+
+  const listing = await Property.findOne({ _id: id, status: { $in: ['pending_review', 'active'] } }).populate<{
+    createdBy: { verificationStatus: string };
+  }>('createdBy', 'verificationStatus');
+
+  if (!listing) {
+    throw ApiError.notFound('Listing not found');
+  }
+
+  return toPublicListing(listing);
 }
 
 export async function updateListing(userId: string, listingId: string, input: UpdateListingInput) {

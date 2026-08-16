@@ -11,6 +11,10 @@ export interface IUser extends Document {
   name: string;
   phone?: string;
   businessName?: string;
+  // Free-text for now (e.g. "Ikoyi, Lagos") — the agent's stated base of
+  // operations, not a listing location. Useful later for per-city outreach
+  // prioritization (Section 5: "inventory density per city").
+  primaryLocation?: string;
   verificationStatus: VerificationStatus;
   createdAt: Date;
   updatedAt: Date;
@@ -24,6 +28,7 @@ const userSchema = new Schema<IUser>(
     name: { type: String, required: true, trim: true },
     phone: { type: String, trim: true },
     businessName: { type: String, trim: true },
+    primaryLocation: { type: String, trim: true },
     // Foundation only for this milestone — no KYC/document verification flow yet.
     verificationStatus: {
       type: String,
@@ -45,6 +50,7 @@ export function toPublicUser(user: IUser) {
     role: user.role,
     phone: user.phone,
     businessName: user.businessName,
+    primaryLocation: user.primaryLocation,
     verificationStatus: user.verificationStatus,
     createdAt: user.createdAt,
   };

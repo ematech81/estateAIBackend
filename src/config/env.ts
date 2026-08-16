@@ -12,6 +12,12 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().optional(),
   AI_MODEL: z.string().default('claude-sonnet-5'),
   WEB_ORIGIN: z.string().default('http://localhost:3000'),
+  // Optional, same lazy-fail convention as ANTHROPIC_API_KEY — app still
+  // boots without these; the upload service throws a clear error only if
+  // actually invoked unconfigured.
+  CLOUDINARY_CLOUD_NAME: z.string().optional(),
+  CLOUDINARY_API_KEY: z.string().optional(),
+  CLOUDINARY_API_SECRET: z.string().optional(),
 });
 
 /**

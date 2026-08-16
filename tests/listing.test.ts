@@ -83,7 +83,7 @@ const validListingPayload = {
 };
 
 describe('POST /api/listings', () => {
-  it('creates a listing for the authenticated agent with status pending_review', async () => {
+  it('creates a listing for the authenticated agent with status active (no moderation queue yet)', async () => {
     const token = await registerAndLogin();
     const res = await request(app)
       .post('/api/listings')
@@ -91,7 +91,7 @@ describe('POST /api/listings', () => {
       .send(validListingPayload);
 
     expect(res.status).toBe(201);
-    expect(res.body.listing.status).toBe('pending_review');
+    expect(res.body.listing.status).toBe('active');
     expect(res.body.listing.source).toBe('internal');
   });
 
@@ -130,6 +130,44 @@ describe('GET /api/listings/mine', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.listings).toHaveLength(1);
+  });
+});
+
+describe('GET /api/listings/mine (routing order regression)', () => {
+  it('still requires auth and is not shadowed by the GET /:id route', async () => {
+    // Guards against the exact bug the routes file comments call out:
+    // '/:id' registered before the literal '/mine' would treat "mine" as an
+    // id and 404/misbehave instead of 401ing for an unauthenticated request.
+    const res = await request(app).get('/api/listings/mine');
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('GET /api/listings/:id', () => {
+  it('returns a public listing without leaking createdBy', async () => {
+    const token = await registerAndLogin();
+    const createRes = await request(app)
+      .post('/api/listings')
+      .set('Authorization', `Bearer ${token}`)
+      .send(validListingPayload);
+    const listingId = createRes.body.listing._id;
+
+    const res = await request(app).get(`/api/listings/${listingId}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.listing._id).toBe(listingId);
+    expect(res.body.listing.agentVerified).toBe(false);
+    expect(res.body.listing.createdBy).toBeUndefined();
+  });
+
+  it('404s for a well-formed id that does not exist', async () => {
+    const res = await request(app).get('/api/listings/64b7f9f9f9f9f9f9f9f9f9f9');
+    expect(res.status).toBe(404);
+  });
+
+  it('404s for a malformed id instead of 500ing', async () => {
+    const res = await request(app).get('/api/listings/not-a-valid-object-id');
+    expect(res.status).toBe(404);
   });
 });
 

@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { ApiError } from '../../utils/ApiError';
 import { extractListingDraft } from '../../services/ai/extraction.service';
-import { createListing, getMyListings, searchListings, updateListing } from './listing.service';
+import { createListing, getListingById, getMyListings, searchListings, updateListing } from './listing.service';
 import {
   createListingSchema,
   draftRequestSchema,
@@ -21,6 +21,13 @@ export const search = asyncHandler(async (req: Request, res: Response) => {
   const input = searchListingsSchema.parse(req.query);
   const listings = await searchListings(input);
   res.status(200).json({ listings });
+});
+
+// Public — no auth. Registered after '/mine' in listing.routes.ts so the
+// literal path isn't shadowed by this param route.
+export const getById = asyncHandler(async (req: Request, res: Response) => {
+  const listing = await getListingById(req.params.id);
+  res.status(200).json({ listing });
 });
 
 export const create = asyncHandler(async (req: Request, res: Response) => {

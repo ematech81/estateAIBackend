@@ -29,6 +29,7 @@ export async function registerUser(input: RegisterInput) {
     role: input.role,
     phone: input.phone,
     businessName: input.businessName,
+    primaryLocation: input.primaryLocation,
   });
 
   const token = issueToken(user._id.toString(), user.role);
