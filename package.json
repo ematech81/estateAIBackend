@@ -10,7 +10,9 @@
     "start": "node dist/server.js",
     "test": "jest --runInBand",
     "lint": "eslint \"src/**/*.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "cleanup:orphans": "ts-node scripts/cleanupOrphans.ts",
+    "promote:admin": "ts-node scripts/promoteToAdmin.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

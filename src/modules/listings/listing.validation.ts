@@ -59,5 +59,40 @@ export const searchListingsSchema = z.object({
   q: z.string().trim().min(1).optional(),
   city: z.string().trim().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(24).default(12),
+  page: z.coerce.number().int().min(1).default(1),
+  // International filter — no separate data source anymore (RentCast was
+  // removed); "international" is just location.country !== 'Nigeria' on
+  // our own agent-submitted listings.
+  //
+  // z.coerce.boolean() is NOT used here deliberately — it coerces via JS's
+  // Boolean(), so the literal string "false" (any non-empty string, really)
+  // becomes `true`. An explicit 'true'/'false' enum + transform avoids that.
+  international: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === 'true')),
+  propertyType: z.enum([
+    'apartment',
+    'duplex',
+    'bungalow',
+    'terrace',
+    'detached_house',
+    'semi_detached_house',
+    'land',
+    'commercial',
+    'other',
+  ]).optional(),
+  // Filtered on the raw price.amount regardless of currency — deliberately
+  // not currency-aware/converted. Local listings are mostly NGN and
+  // International mostly USD (very different scales), so a shared numeric
+  // range only makes sense in the context of whichever tab is active. Known
+  // simplification, not hidden.
+  minPrice: z.coerce.number().min(0).optional(),
+  maxPrice: z.coerce.number().min(0).optional(),
+  // Powers the agent-detail page's "their listings" grid.
+  agentId: z
+    .string()
+    .regex(/^[0-9a-fA-F]{24}$/, 'Invalid agent id')
+    .optional(),
 });
 export type SearchListingsInput = z.infer<typeof searchListingsSchema>;

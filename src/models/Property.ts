@@ -1,10 +1,12 @@
 import { Schema, model, Document, Types } from 'mongoose';
 
 // Canonical property schema — Section 9 of the master build prompt.
-// Every source (internal Nigerian listings, RentCast, future providers) is
-// normalized into this exact shape before it ever reaches the frontend.
+// `source` is kept for provenance/future-proofing even though it only has
+// one value right now — a licensed-external-data integration (RentCast) was
+// built and then deliberately removed; every listing is agent-submitted
+// again, "international" now just means location.country !== 'Nigeria'.
 
-export type PropertySource = 'internal' | 'rentcast';
+export type PropertySource = 'internal';
 export type ListingType = 'rent' | 'sale' | 'shortlet';
 export type PropertyType =
   | 'apartment'
@@ -95,7 +97,7 @@ const specificationsSchema = new Schema<IPropertySpecifications>(
 
 const propertySchema = new Schema<IProperty>(
   {
-    source: { type: String, enum: ['internal', 'rentcast'], required: true, default: 'internal' },
+    source: { type: String, enum: ['internal'], required: true, default: 'internal' },
     sourcePropertyId: { type: String },
     createdBy: { type: Schema.Types.ObjectId, ref: 'User', required: true },
     title: { type: String, required: true, trim: true },

@@ -118,6 +118,110 @@ describe('POST /api/listings', () => {
   });
 });
 
+describe('GET /api/listings (search/pagination)', () => {
+  async function createNListings(token: string, n: number) {
+    for (let i = 0; i < n; i++) {
+      await request(app)
+        .post('/api/listings')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...validListingPayload, title: `${validListingPayload.title} #${i}` });
+    }
+  }
+
+  it('defaults to 12 per page and reports pagination metadata', async () => {
+    const token = await registerAndLogin();
+    await createNListings(token, 15);
+
+    const res = await request(app).get('/api/listings');
+
+    expect(res.status).toBe(200);
+    expect(res.body.listings).toHaveLength(12);
+    expect(res.body).toMatchObject({ total: 15, page: 1, limit: 12, totalPages: 2 });
+  });
+
+  it('returns the remainder on page 2, with no overlap with page 1', async () => {
+    const token = await registerAndLogin();
+    await createNListings(token, 15);
+
+    const page1 = await request(app).get('/api/listings?page=1');
+    const page2 = await request(app).get('/api/listings?page=2');
+
+    expect(page2.body.listings).toHaveLength(3);
+    expect(page2.body.page).toBe(2);
+
+    const page1Ids = page1.body.listings.map((l: { _id: string }) => l._id);
+    const page2Ids = page2.body.listings.map((l: { _id: string }) => l._id);
+    expect(page1Ids.some((id: string) => page2Ids.includes(id))).toBe(false);
+  });
+
+  it('an empty-of-results page still reports correct totals, not an error', async () => {
+    const token = await registerAndLogin();
+    await createNListings(token, 5);
+
+    const res = await request(app).get('/api/listings?page=99');
+
+    expect(res.status).toBe(200);
+    expect(res.body.listings).toHaveLength(0);
+    expect(res.body).toMatchObject({ total: 5, page: 99, totalPages: 1 });
+  });
+
+  it('filters by international (location.country !== Nigeria)', async () => {
+    const token = await registerAndLogin();
+    await request(app).post('/api/listings').set('Authorization', `Bearer ${token}`).send(validListingPayload); // Nigeria
+    await request(app)
+      .post('/api/listings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        ...validListingPayload,
+        location: { ...validListingPayload.location, country: 'United States', state: 'TX', city: 'Austin' },
+      });
+
+    const noFilter = await request(app).get('/api/listings');
+    const internationalOnly = await request(app).get('/api/listings?international=true');
+    const localOnly = await request(app).get('/api/listings?international=false');
+
+    expect(noFilter.body.total).toBe(2);
+    expect(internationalOnly.body.total).toBe(1);
+    expect(internationalOnly.body.listings[0].location.country).toBe('United States');
+    expect(localOnly.body.total).toBe(1);
+    expect(localOnly.body.listings[0].location.country).toBe('Nigeria');
+  });
+
+  it('filters by propertyType', async () => {
+    const token = await registerAndLogin();
+    await request(app)
+      .post('/api/listings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ...validListingPayload, propertyType: 'apartment' });
+    await request(app)
+      .post('/api/listings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ...validListingPayload, propertyType: 'land' });
+
+    const res = await request(app).get('/api/listings?propertyType=land');
+
+    expect(res.body.total).toBe(1);
+    expect(res.body.listings[0].propertyType).toBe('land');
+  });
+
+  it('filters by min/max price range', async () => {
+    const token = await registerAndLogin();
+    await request(app)
+      .post('/api/listings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ...validListingPayload, price: { ...validListingPayload.price, amount: 2_000_000 } });
+    await request(app)
+      .post('/api/listings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ...validListingPayload, price: { ...validListingPayload.price, amount: 10_000_000 } });
+
+    const res = await request(app).get('/api/listings?minPrice=5000000&maxPrice=15000000');
+
+    expect(res.body.total).toBe(1);
+    expect(res.body.listings[0].price.amount).toBe(10_000_000);
+  });
+});
+
 describe('GET /api/listings/mine', () => {
   it('only returns listings created by the requesting agent', async () => {
     const tokenA = await registerAndLogin('agent-a@example.com');

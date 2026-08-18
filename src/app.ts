@@ -8,6 +8,9 @@ import { listingRouter } from './modules/listings/listing.routes';
 import { userRouter } from './modules/users/user.routes';
 import { leadRouter } from './modules/leads/lead.routes';
 import { uploadRouter } from './modules/uploads/upload.routes';
+import { analyticsRouter } from './modules/analytics/analytics.routes';
+import { blogRouter } from './modules/blog/blog.routes';
+import { blogAdminRouter } from './modules/blogAdmin/blogAdmin.routes';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 
 // In production, only the configured WEB_ORIGIN is allowed. In development,
@@ -44,6 +47,9 @@ export function createApp(): Express {
   app.use('/api/users', userRouter);
   app.use('/api/leads', leadRouter);
   app.use('/api/uploads', uploadRouter);
+  app.use('/api/analytics', analyticsRouter);
+  app.use('/api/blog', blogRouter);
+  app.use('/api/blog-admin', blogAdminRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

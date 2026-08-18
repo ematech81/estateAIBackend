@@ -40,7 +40,17 @@ export async function getMyListings(userId: string) {
 // moderation/approval pipeline exists yet either, so both `pending_review`
 // and `active` are treated as publicly visible for now; narrow this to
 // `active` only once an approval step exists.
-export async function searchListings({ q, city, limit }: SearchListingsInput) {
+export async function searchListings({
+  q,
+  city,
+  limit,
+  page,
+  international,
+  propertyType,
+  minPrice,
+  maxPrice,
+  agentId,
+}: SearchListingsInput) {
   const filter: Record<string, unknown> = { status: { $in: ['pending_review', 'active'] } };
 
   if (city) {
@@ -50,16 +60,45 @@ export async function searchListings({ q, city, limit }: SearchListingsInput) {
     const pattern = new RegExp(escapeRegex(q), 'i');
     filter.$or = [{ title: pattern }, { description: pattern }, { 'location.city': pattern }];
   }
+  if (international != null) {
+    filter['location.country'] = international ? { $ne: 'Nigeria' } : 'Nigeria';
+  }
+  if (propertyType) {
+    filter.propertyType = propertyType;
+  }
+  if (minPrice != null || maxPrice != null) {
+    filter['price.amount'] = {
+      ...(minPrice != null ? { $gte: minPrice } : {}),
+      ...(maxPrice != null ? { $lte: maxPrice } : {}),
+    };
+  }
+  if (agentId) {
+    filter.createdBy = new Types.ObjectId(agentId);
+  }
 
-  const listings = await Property.find(filter)
-    .sort({ createdAt: -1 })
-    .limit(limit)
-    // Only the one non-sensitive field needed to decide whether to show a
-    // "Verified" badge — never leak the agent's email/phone/etc. here
-    // (Section 13.5: never expose sensitive agent/user info unnecessarily).
-    .populate<{ createdBy: { verificationStatus: string } }>('createdBy', 'verificationStatus');
+  const skip = (page - 1) * limit;
 
-  return listings.map(toPublicListing);
+  // Run the page fetch and the total count in parallel — count doesn't
+  // depend on the page's results, no reason to serialize them.
+  const [listings, total] = await Promise.all([
+    Property.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      // Only the one non-sensitive field needed to decide whether to show a
+      // "Verified" badge — never leak the agent's email/phone/etc. here
+      // (Section 13.5: never expose sensitive agent/user info unnecessarily).
+      .populate<{ createdBy: { verificationStatus: string } }>('createdBy', 'verificationStatus'),
+    Property.countDocuments(filter),
+  ]);
+
+  return {
+    listings: listings.map(toPublicListing),
+    total,
+    page,
+    limit,
+    totalPages: Math.max(1, Math.ceil(total / limit)),
+  };
 }
 
 // Public single-listing fetch — same visibility rule as search (only

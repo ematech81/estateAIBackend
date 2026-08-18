@@ -19,8 +19,8 @@ export const generateDraft = asyncHandler(async (req: Request, res: Response) =>
 // Public — no auth. Registered before requireAuth in listing.routes.ts.
 export const search = asyncHandler(async (req: Request, res: Response) => {
   const input = searchListingsSchema.parse(req.query);
-  const listings = await searchListings(input);
-  res.status(200).json({ listings });
+  const result = await searchListings(input);
+  res.status(200).json(result);
 });
 
 // Public — no auth. Registered after '/mine' in listing.routes.ts so the
