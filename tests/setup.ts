@@ -19,3 +19,7 @@ process.env.ANTHROPIC_API_KEY = '';
 process.env.CLOUDINARY_CLOUD_NAME = '';
 process.env.CLOUDINARY_API_KEY = '';
 process.env.CLOUDINARY_API_SECRET = '';
+// Same reasoning — without this, the password-reset tests would try to
+// send real email through a developer's real Brevo account.
+process.env.BREVO_API_KEY = '';
+process.env.BREVO_SENDER_EMAIL = '';

@@ -18,6 +18,16 @@ const envSchema = z.object({
   CLOUDINARY_CLOUD_NAME: z.string().optional(),
   CLOUDINARY_API_KEY: z.string().optional(),
   CLOUDINARY_API_SECRET: z.string().optional(),
+  // Brevo — transactional email (password reset). Same lazy-fail
+  // convention: the app boots without these, but requesting a password
+  // reset while unconfigured fails loudly server-side rather than silently
+  // pretending to have sent an email.
+  BREVO_API_KEY: z.string().optional(),
+  // Plain z.string() (not .email()) to match every other optional secret's
+  // convention — tests/setup.ts blanks this to '' so tests never touch a
+  // developer's real Brevo account, and an .email() refinement would
+  // reject that empty string instead of treating it as "unconfigured".
+  BREVO_SENDER_EMAIL: z.string().optional(),
 });
 
 /**

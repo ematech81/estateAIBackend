@@ -293,4 +293,51 @@ describe('PATCH /api/listings/:id', () => {
 
     expect(res.status).toBe(403);
   });
+
+  it('404s editing a listing that does not exist', async () => {
+    const token = await registerAndLogin();
+    const res = await request(app)
+      .patch('/api/listings/64b7f9f9f9f9f9f9f9f9f9f9')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ title: 'Does not matter' });
+
+    expect(res.status).toBe(404);
+  });
+
+  it('lets the owner update their own listing, persisting the change', async () => {
+    const token = await registerAndLogin();
+    const createRes = await request(app)
+      .post('/api/listings')
+      .set('Authorization', `Bearer ${token}`)
+      .send(validListingPayload);
+    const listingId = createRes.body.listing._id;
+
+    const res = await request(app)
+      .patch(`/api/listings/${listingId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ...validListingPayload, title: 'Updated title', price: { ...validListingPayload.price, amount: 9_500_000 } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.listing.title).toBe('Updated title');
+    expect(res.body.listing.price.amount).toBe(9_500_000);
+
+    const fetchRes = await request(app).get(`/api/listings/${listingId}`);
+    expect(fetchRes.body.listing.title).toBe('Updated title');
+  });
+
+  it('rejects an edit that would make the price non-positive, even for the owner', async () => {
+    const token = await registerAndLogin();
+    const createRes = await request(app)
+      .post('/api/listings')
+      .set('Authorization', `Bearer ${token}`)
+      .send(validListingPayload);
+    const listingId = createRes.body.listing._id;
+
+    const res = await request(app)
+      .patch(`/api/listings/${listingId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ price: { ...validListingPayload.price, amount: -1 } });
+
+    expect(res.status).toBe(400);
+  });
 });
