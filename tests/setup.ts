@@ -23,3 +23,19 @@ process.env.CLOUDINARY_API_SECRET = '';
 // send real email through a developer's real Brevo account.
 process.env.BREVO_API_KEY = '';
 process.env.BREVO_SENDER_EMAIL = '';
+// Same reasoning — tests must never depend on, or accidentally hit, a
+// developer's real KoraPay account.
+process.env.KORAPAY_SECRET_KEY = '';
+process.env.ROUTER_FORWARD_SECRET = '';
+
+// Global mock, not per-file: registerUser() now sends a verification email
+// on every registration, and registerAndLogin() helpers are used across
+// nearly every test file — without this, every single one of those calls
+// would hit the real (blanked-out, so throwing) email service and spam a
+// caught-but-logged "not configured" error on every test run. Auto-mocked
+// exports resolve to undefined and never throw, which is exactly the
+// "email sent successfully" shape most tests should see by default.
+// auth.test.ts's own `jest.mock` + typed casts still work on top of this —
+// it just needs specific per-test return values (mockResolvedValueOnce,
+// mockRejectedValueOnce, etc.), not a different mock altogether.
+jest.mock('../src/services/email/email.service');

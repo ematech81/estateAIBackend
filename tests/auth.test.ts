@@ -2,6 +2,7 @@ import request from 'supertest';
 import { createApp } from '../src/app';
 import { startTestDB, stopTestDB, clearTestDB } from './helpers/testDb';
 import { PasswordResetToken } from '../src/models/PasswordResetToken';
+import { EmailVerificationToken } from '../src/models/EmailVerificationToken';
 import * as emailService from '../src/services/email/email.service';
 
 // Mocked so these tests never hit the real Brevo API (or depend on the
@@ -11,9 +12,12 @@ jest.mock('../src/services/email/email.service');
 const mockedSendPasswordResetEmail = emailService.sendPasswordResetEmail as jest.MockedFunction<
   typeof emailService.sendPasswordResetEmail
 >;
+const mockedSendEmailVerificationEmail = emailService.sendEmailVerificationEmail as jest.MockedFunction<
+  typeof emailService.sendEmailVerificationEmail
+>;
 
-function extractTokenFromResetUrl(resetUrl: string): string {
-  return new URL(resetUrl).searchParams.get('token') as string;
+function extractTokenFromUrl(url: string): string {
+  return new URL(url).searchParams.get('token') as string;
 }
 
 const app = createApp();
@@ -29,6 +33,7 @@ afterAll(async () => {
 afterEach(async () => {
   await clearTestDB();
   mockedSendPasswordResetEmail.mockClear();
+  mockedSendEmailVerificationEmail.mockClear();
 });
 
 const validAgent = {
@@ -150,7 +155,7 @@ describe('POST /api/auth/reset-password', () => {
     mockedSendPasswordResetEmail.mockResolvedValueOnce(undefined);
     await request(app).post('/api/auth/forgot-password').send({ email });
     const resetUrl = mockedSendPasswordResetEmail.mock.calls[0][2];
-    return extractTokenFromResetUrl(resetUrl);
+    return extractTokenFromUrl(resetUrl);
   }
 
   it('resets the password with a valid token — new password works, old one no longer does', async () => {
@@ -215,5 +220,107 @@ describe('POST /api/auth/reset-password', () => {
       .send({ token: 'whatever-token', newPassword: 'short' });
 
     expect(res.status).toBe(400);
+  });
+});
+
+describe('email verification', () => {
+  async function registerAndGetVerificationToken(email = validAgent.email): Promise<string> {
+    mockedSendEmailVerificationEmail.mockResolvedValueOnce(undefined);
+    await request(app).post('/api/auth/register').send({ ...validAgent, email });
+    const verifyUrl = mockedSendEmailVerificationEmail.mock.calls[0][2];
+    return extractTokenFromUrl(verifyUrl);
+  }
+
+  it('sends a verification email on registration, and the new account starts unverified', async () => {
+    const res = await request(app).post('/api/auth/register').send(validAgent);
+
+    expect(res.status).toBe(201);
+    expect(res.body.user.emailVerified).toBe(false);
+    expect(mockedSendEmailVerificationEmail).toHaveBeenCalledTimes(1);
+    expect(mockedSendEmailVerificationEmail.mock.calls[0][0]).toBe(validAgent.email);
+  });
+
+  it('registration still succeeds even if the verification email fails to send', async () => {
+    mockedSendEmailVerificationEmail.mockRejectedValueOnce(new Error('Brevo is down'));
+
+    const res = await request(app).post('/api/auth/register').send(validAgent);
+
+    expect(res.status).toBe(201);
+  });
+
+  describe('POST /api/auth/verify-email', () => {
+    it('marks the account verified with a valid token', async () => {
+      const token = await registerAndGetVerificationToken();
+
+      const res = await request(app).post('/api/auth/verify-email').send({ token });
+      expect(res.status).toBe(200);
+
+      const me = await request(app)
+        .post('/api/auth/login')
+        .send({ email: validAgent.email, password: validAgent.password });
+      const profile = await request(app).get('/api/users/me').set('Authorization', `Bearer ${me.body.token}`);
+      expect(profile.body.user.emailVerified).toBe(true);
+    });
+
+    it('rejects an invalid/garbage token', async () => {
+      const res = await request(app).post('/api/auth/verify-email').send({ token: 'not-a-real-token' });
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects reusing an already-redeemed token', async () => {
+      const token = await registerAndGetVerificationToken();
+
+      await request(app).post('/api/auth/verify-email').send({ token });
+      const secondAttempt = await request(app).post('/api/auth/verify-email').send({ token });
+
+      expect(secondAttempt.status).toBe(400);
+    });
+
+    it('rejects an expired token', async () => {
+      const token = await registerAndGetVerificationToken();
+      await EmailVerificationToken.updateMany({}, { expiresAt: new Date(Date.now() - 1000) });
+
+      const res = await request(app).post('/api/auth/verify-email').send({ token });
+      expect(res.status).toBe(400);
+    });
+  });
+
+  describe('POST /api/auth/resend-verification', () => {
+    it('requires auth', async () => {
+      const res = await request(app).post('/api/auth/resend-verification');
+      expect(res.status).toBe(401);
+    });
+
+    it('resends to the signed-in user\'s own email for an unverified account', async () => {
+      mockedSendEmailVerificationEmail.mockResolvedValue(undefined);
+      const registerRes = await request(app).post('/api/auth/register').send(validAgent);
+      mockedSendEmailVerificationEmail.mockClear(); // ignore the registration-time send
+
+      const res = await request(app)
+        .post('/api/auth/resend-verification')
+        .set('Authorization', `Bearer ${registerRes.body.token}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.alreadyVerified).toBe(false);
+      expect(mockedSendEmailVerificationEmail).toHaveBeenCalledTimes(1);
+      expect(mockedSendEmailVerificationEmail.mock.calls[0][0]).toBe(validAgent.email);
+    });
+
+    it('is a no-op that reports alreadyVerified for an already-verified account', async () => {
+      const token = await registerAndGetVerificationToken();
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ email: validAgent.email, password: validAgent.password });
+      await request(app).post('/api/auth/verify-email').send({ token });
+      mockedSendEmailVerificationEmail.mockClear();
+
+      const res = await request(app)
+        .post('/api/auth/resend-verification')
+        .set('Authorization', `Bearer ${loginRes.body.token}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.alreadyVerified).toBe(true);
+      expect(mockedSendEmailVerificationEmail).not.toHaveBeenCalled();
+    });
   });
 });

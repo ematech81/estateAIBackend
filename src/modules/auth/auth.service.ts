@@ -3,15 +3,17 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { env } from '../../config/env';
 import { ApiError } from '../../utils/ApiError';
-import { User } from '../../models/User';
+import { IUser, User } from '../../models/User';
 import { PasswordResetToken } from '../../models/PasswordResetToken';
-import { sendPasswordResetEmail } from '../../services/email/email.service';
+import { EmailVerificationToken } from '../../models/EmailVerificationToken';
+import { sendEmailVerificationEmail, sendPasswordResetEmail } from '../../services/email/email.service';
 import { LoginInput, RegisterInput } from './auth.validation';
 
 const SALT_ROUNDS = 10;
 const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1 hour
+const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours — longer than a reset link since there's no urgency pressure
 
-function hashResetToken(rawToken: string): string {
+function hashToken(rawToken: string): string {
   return crypto.createHash('sha256').update(rawToken).digest('hex');
 }
 
@@ -21,6 +23,29 @@ function issueToken(userId: string, role: string): string {
   // the cast is safe here and keeps the env schema simple.
   const options: jwt.SignOptions = { expiresIn: env.JWT_EXPIRES_IN as jwt.SignOptions['expiresIn'] };
   return jwt.sign({ sub: userId, role }, env.JWT_SECRET, options);
+}
+
+// Shared by registration and the resend endpoint. Swallows its own
+// email-send failure — a Brevo hiccup should never break registration
+// itself, and resend-verification's controller does its own generic
+// "sent" response regardless (same non-leaking pattern as password reset).
+async function issueAndSendVerificationEmail(user: IUser): Promise<void> {
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const tokenHash = hashToken(rawToken);
+
+  await EmailVerificationToken.deleteMany({ user: user._id });
+  await EmailVerificationToken.create({
+    user: user._id,
+    tokenHash,
+    expiresAt: new Date(Date.now() + VERIFICATION_TOKEN_TTL_MS),
+  });
+
+  const verifyUrl = `${env.WEB_ORIGIN}/verify-email?token=${rawToken}`;
+  try {
+    await sendEmailVerificationEmail(user.email, user.name, verifyUrl);
+  } catch (err) {
+    console.error('Verification email failed to send:', err);
+  }
 }
 
 export async function registerUser(input: RegisterInput) {
@@ -40,8 +65,43 @@ export async function registerUser(input: RegisterInput) {
     primaryLocation: input.primaryLocation,
   });
 
+  // Registration succeeds regardless of whether this email actually sends
+  // — an agent shouldn't be locked out of an account they just paid
+  // nothing to create because of a transient email-provider issue.
+  await issueAndSendVerificationEmail(user);
+
   const token = issueToken(user._id.toString(), user.role);
   return { token, user };
+}
+
+export async function verifyEmail(rawToken: string): Promise<void> {
+  const tokenHash = hashToken(rawToken);
+  const record = await EmailVerificationToken.findOne({ tokenHash });
+  if (!record || record.expiresAt < new Date()) {
+    throw ApiError.badRequest('This verification link is invalid or has expired.');
+  }
+
+  const user = await User.findById(record.user);
+  if (!user) {
+    throw ApiError.badRequest('This verification link is invalid or has expired.');
+  }
+
+  user.emailVerified = true;
+  await user.save();
+  await EmailVerificationToken.deleteOne({ _id: record._id });
+}
+
+export async function resendVerificationEmail(userId: string): Promise<{ alreadyVerified: boolean }> {
+  const user = await User.findById(userId);
+  if (!user) {
+    throw ApiError.notFound('User not found');
+  }
+  if (user.emailVerified) {
+    return { alreadyVerified: true };
+  }
+
+  await issueAndSendVerificationEmail(user);
+  return { alreadyVerified: false };
 }
 
 // Deliberately silent (no throw, no "account not found") when the email
@@ -54,7 +114,7 @@ export async function requestPasswordReset(email: string): Promise<void> {
   if (!user) return;
 
   const rawToken = crypto.randomBytes(32).toString('hex');
-  const tokenHash = hashResetToken(rawToken);
+  const tokenHash = hashToken(rawToken);
 
   // Only one live reset link per account — starting a new request
   // invalidates any earlier unused one rather than leaving both valid.
@@ -70,7 +130,7 @@ export async function requestPasswordReset(email: string): Promise<void> {
 }
 
 export async function resetPassword(rawToken: string, newPassword: string): Promise<void> {
-  const tokenHash = hashResetToken(rawToken);
+  const tokenHash = hashToken(rawToken);
   const record = await PasswordResetToken.findOne({ tokenHash });
   if (!record || record.expiresAt < new Date()) {
     throw ApiError.badRequest('This reset link is invalid or has expired.');

@@ -11,6 +11,7 @@ import { uploadRouter } from './modules/uploads/upload.routes';
 import { analyticsRouter } from './modules/analytics/analytics.routes';
 import { blogRouter } from './modules/blog/blog.routes';
 import { blogAdminRouter } from './modules/blogAdmin/blogAdmin.routes';
+import { korapayWebhookRouter, paymentRouter } from './modules/payments/payment.routes';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 
 // In production, only the configured WEB_ORIGIN is allowed. In development,
@@ -50,6 +51,10 @@ export function createApp(): Express {
   app.use('/api/analytics', analyticsRouter);
   app.use('/api/blog', blogRouter);
   app.use('/api/blog-admin', blogAdminRouter);
+  app.use('/api/payments', paymentRouter);
+  // This exact path is what ROUTE_EST points to on the shared
+  // korapay-webhook-router once this app is deployed.
+  app.use('/api/webhooks/korapay', korapayWebhookRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

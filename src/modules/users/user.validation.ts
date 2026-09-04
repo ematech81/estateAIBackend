@@ -7,6 +7,7 @@ export const updateProfileSchema = z.object({
   phone: z.string().min(7).optional(),
   businessName: z.string().min(2).optional(),
   primaryLocation: z.string().min(2).optional(),
+  emailMarketingOptIn: z.boolean().optional(),
 });
 export type UpdateProfileInput = z.infer<typeof updateProfileSchema>;
 

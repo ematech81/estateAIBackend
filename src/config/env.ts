@@ -28,6 +28,15 @@ const envSchema = z.object({
   // developer's real Brevo account, and an .email() refinement would
   // reject that empty string instead of treating it as "unconfigured".
   BREVO_SENDER_EMAIL: z.string().optional(),
+  // KoraPay — subscriptions, routed through a shared webhook router used
+  // across multiple apps (see modules/payments/). Same lazy-fail
+  // convention as the others above.
+  KORAPAY_SECRET_KEY: z.string().optional(),
+  // Shared secret the router attaches to every forwarded webhook
+  // (x-router-secret header) — optional here on purpose: the signature
+  // check below is the real proof of origin, this is just a second layer
+  // when set, and skipped when not.
+  ROUTER_FORWARD_SECRET: z.string().optional(),
 });
 
 /**

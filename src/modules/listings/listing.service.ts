@@ -1,25 +1,67 @@
 import { Types, isValidObjectId } from 'mongoose';
 import { Property } from '../../models/Property';
+import { User } from '../../models/User';
 import { ApiError } from '../../utils/ApiError';
+import { PLANS, PlanTier } from '../../config/plans';
+import { getEffectivePlanTier } from '../../services/plans/plan.service';
+import { notifyNewListingIfPremium } from '../payments/payment.service';
 import { CreateListingInput, SearchListingsInput, UpdateListingInput } from './listing.validation';
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+type PopulatedCreator = { verificationStatus?: string; planTier?: PlanTier; planExpiresAt?: Date };
+
 // Shared by searchListings and getListingById — strips createdBy down to
-// the one derived boolean the UI needs (Section 13.5: never expose
-// sensitive agent/user info unnecessarily).
+// the derived fields the UI/SEO logic actually needs (Section 13.5: never
+// expose sensitive agent/user info unnecessarily — no email/phone/raw
+// plan-tier string ever leaves this function).
 type WithPopulatedCreator = { createdBy: unknown; toObject: () => Record<string, unknown> };
 function toPublicListing(listing: WithPopulatedCreator) {
   const { createdBy, ...rest } = listing.toObject();
-  const agentVerified =
-    (createdBy as { verificationStatus?: string } | undefined)?.verificationStatus === 'verified';
-  return { ...rest, agentVerified };
+  const creator = createdBy as PopulatedCreator | undefined;
+  const agentVerified = creator?.verificationStatus === 'verified';
+  const effectiveTier: PlanTier = creator
+    ? getEffectivePlanTier({ planTier: creator.planTier ?? 'free', planExpiresAt: creator.planExpiresAt })
+    : 'free';
+  return {
+    ...rest,
+    agentVerified,
+    // "Promoted"-style badge on Basic/Premium listings — makes the
+    // "priority on search results" feature actually visible, not just an
+    // invisible sort order.
+    featured: effectiveTier !== 'free',
+    googleIndexable: PLANS[effectiveTier].googleIndexable,
+  };
 }
 
+const CREATOR_PLAN_FIELDS = 'verificationStatus planTier planExpiresAt';
+
 export async function createListing(userId: string, input: CreateListingInput) {
-  return Property.create({
+  const user = await User.findById(userId);
+  if (!user) {
+    throw ApiError.unauthorized();
+  }
+
+  const effectiveTier = getEffectivePlanTier(user);
+  const quota = PLANS[effectiveTier].listingQuotaPerMonth;
+  if (quota !== Infinity) {
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+    const countThisMonth = await Property.countDocuments({
+      createdBy: userId,
+      createdAt: { $gte: startOfMonth },
+    });
+    if (countThisMonth >= quota) {
+      throw ApiError.forbidden(
+        `You've reached your ${PLANS[effectiveTier].name} plan's limit of ${quota} listing${quota === 1 ? '' : 's'} this month. Upgrade to list more.`,
+      );
+    }
+  }
+
+  const listing = await Property.create({
     ...input,
     source: 'internal',
     createdBy: new Types.ObjectId(userId),
@@ -29,6 +71,14 @@ export async function createListing(userId: string, input: CreateListingInput) {
     // (Section 10) is built, so it means something again.
     status: 'active',
   });
+
+  // Fire-and-forget — a Premium agent's new listing triggers an opt-in
+  // email to other users. Never blocks or fails listing creation itself.
+  notifyNewListingIfPremium(listing, userId).catch((err) => {
+    console.error('New-listing notification failed:', err);
+  });
+
+  return listing;
 }
 
 export async function getMyListings(userId: string) {
@@ -77,23 +127,60 @@ export async function searchListings({
   }
 
   const skip = (page - 1) * limit;
+  const now = new Date();
 
-  // Run the page fetch and the total count in parallel — count doesn't
-  // depend on the page's results, no reason to serialize them.
+  // Aggregation (not a plain .find().sort()) because "priority on search
+  // results" sorts by the LISTING OWNER's plan, a joined field — Mongoose
+  // can't sort by a populated field's value without one. Paid (effective,
+  // non-expired) listings sort first, then most-recent within each tier.
   const [listings, total] = await Promise.all([
-    Property.find(filter)
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      // Only the one non-sensitive field needed to decide whether to show a
-      // "Verified" badge — never leak the agent's email/phone/etc. here
-      // (Section 13.5: never expose sensitive agent/user info unnecessarily).
-      .populate<{ createdBy: { verificationStatus: string } }>('createdBy', 'verificationStatus'),
+    Property.aggregate([
+      { $match: filter },
+      {
+        $lookup: {
+          from: 'users',
+          localField: 'createdBy',
+          foreignField: '_id',
+          as: 'creator',
+        },
+      },
+      { $unwind: '$creator' },
+      {
+        $addFields: {
+          agentVerified: { $eq: ['$creator.verificationStatus', 'verified'] },
+          _planActive: { $and: [{ $ne: ['$creator.planTier', 'free'] }, { $gt: ['$creator.planExpiresAt', now] }] },
+          _searchPriority: {
+            $switch: {
+              branches: [
+                {
+                  case: {
+                    $and: [{ $eq: ['$creator.planTier', 'premium'] }, { $gt: ['$creator.planExpiresAt', now] }],
+                  },
+                  then: PLANS.premium.searchPriority,
+                },
+                {
+                  case: {
+                    $and: [{ $eq: ['$creator.planTier', 'basic'] }, { $gt: ['$creator.planExpiresAt', now] }],
+                  },
+                  then: PLANS.basic.searchPriority,
+                },
+              ],
+              default: PLANS.free.searchPriority,
+            },
+          },
+        },
+      },
+      { $addFields: { featured: '$_planActive' } },
+      { $sort: { _searchPriority: -1, createdAt: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      { $project: { creator: 0, _planActive: 0, _searchPriority: 0 } },
+    ]),
     Property.countDocuments(filter),
   ]);
 
   return {
-    listings: listings.map(toPublicListing),
+    listings,
     total,
     page,
     limit,
@@ -112,8 +199,8 @@ export async function getListingById(id: string) {
   }
 
   const listing = await Property.findOne({ _id: id, status: { $in: ['pending_review', 'active'] } }).populate<{
-    createdBy: { verificationStatus: string };
-  }>('createdBy', 'verificationStatus');
+    createdBy: PopulatedCreator;
+  }>('createdBy', CREATOR_PLAN_FIELDS);
 
   if (!listing) {
     throw ApiError.notFound('Listing not found');

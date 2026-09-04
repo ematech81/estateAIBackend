@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { env } from '../../config/env';
+import { ApiError } from '../../utils/ApiError';
 import { AIProvider, ListingDraft, listingDraftSchema } from './AIProvider';
 
 const SYSTEM_PROMPT = `You extract structured real-estate listing data from a Nigerian agent's free-text description.
@@ -27,7 +28,12 @@ export class AnthropicProvider implements AIProvider {
 
   constructor(apiKey: string = env.ANTHROPIC_API_KEY ?? '', model: string = env.AI_MODEL) {
     if (!apiKey) {
-      throw new Error('ANTHROPIC_API_KEY is not configured');
+      // ApiError (not a plain Error) so this specific, safe-to-show message
+      // survives the global error handler — same reasoning and same
+      // pattern as upload.service.ts's Cloudinary check. A plain Error
+      // here would now be swallowed into the generic "something went
+      // wrong" message along with every other unanticipated failure.
+      throw new ApiError(500, 'AI-assisted listing extraction is not configured on the server yet');
     }
     this.client = new Anthropic({ apiKey });
     this.model = model;

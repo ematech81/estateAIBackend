@@ -3,6 +3,15 @@ import { createApp } from '../src/app';
 import { startTestDB, stopTestDB, clearTestDB } from './helpers/testDb';
 import { setAIProvider } from '../src/services/ai/extraction.service';
 import { AIProvider, ListingDraft } from '../src/services/ai/AIProvider';
+import { User } from '../src/models/User';
+import * as emailService from '../src/services/email/email.service';
+
+// tests/setup.ts already globally mocks this module (so every registration
+// email across every test file is a harmless no-op) — this just gets a
+// typed handle on that same mock to assert on calls in the tests below.
+const mockedSendNewListingEmail = emailService.sendNewListingEmail as jest.MockedFunction<
+  typeof emailService.sendNewListingEmail
+>;
 
 const app = createApp();
 
@@ -16,6 +25,7 @@ afterAll(async () => {
 
 afterEach(async () => {
   await clearTestDB();
+  mockedSendNewListingEmail.mockClear();
 });
 
 async function registerAndLogin(email = 'agent@example.com') {
@@ -119,7 +129,11 @@ describe('POST /api/listings', () => {
 });
 
 describe('GET /api/listings (search/pagination)', () => {
-  async function createNListings(token: string, n: number) {
+  // These tests are about pagination, not the listing-quota feature — bump
+  // to Premium (unlimited) first so a Free plan's 2/month cap doesn't
+  // silently make most of these creates fail.
+  async function createNListings(token: string, n: number, email = 'agent@example.com') {
+    await User.updateOne({ email }, { planTier: 'premium', planExpiresAt: new Date(Date.now() + 30 * 86_400_000) });
     for (let i = 0; i < n; i++) {
       await request(app)
         .post('/api/listings')
@@ -219,6 +233,161 @@ describe('GET /api/listings (search/pagination)', () => {
 
     expect(res.body.total).toBe(1);
     expect(res.body.listings[0].price.amount).toBe(10_000_000);
+  });
+});
+
+describe('New-listing email notification (Premium plan only)', () => {
+  // createListing() fires this without awaiting it (fire-and-forget) so it
+  // never blocks or fails the create response — give the microtask queue
+  // one tick to let it actually run before asserting on the mock.
+  const flush = () => new Promise((r) => setTimeout(r, 50));
+
+  it('does not email anyone when a Free-plan agent publishes', async () => {
+    const token = await registerAndLogin();
+    await User.updateOne({ email: 'agent@example.com' }, { emailMarketingOptIn: false });
+    await request(app).post('/api/listings').set('Authorization', `Bearer ${token}`).send(validListingPayload);
+    await flush();
+
+    expect(mockedSendNewListingEmail).not.toHaveBeenCalled();
+  });
+
+  it('emails opted-in users when a Premium-plan agent publishes', async () => {
+    const posterToken = await registerAndLogin('premium-poster@example.com');
+    await User.updateOne(
+      { email: 'premium-poster@example.com' },
+      { planTier: 'premium', planExpiresAt: new Date(Date.now() + 30 * 86_400_000) },
+    );
+    await registerAndLogin('opted-in@example.com');
+    await User.updateOne({ email: 'opted-in@example.com' }, { emailMarketingOptIn: true });
+    await registerAndLogin('opted-out@example.com'); // opted-in defaults false — deliberately left as-is
+
+    await request(app)
+      .post('/api/listings')
+      .set('Authorization', `Bearer ${posterToken}`)
+      .send({ ...validListingPayload, title: 'A Premium Listing' });
+    await flush();
+
+    expect(mockedSendNewListingEmail).toHaveBeenCalledTimes(1);
+    const [toEmail, , listingTitle] = mockedSendNewListingEmail.mock.calls[0];
+    expect(toEmail).toBe('opted-in@example.com');
+    expect(listingTitle).toBe('A Premium Listing');
+  });
+
+  it('never emails the poster themselves, even if they are opted in', async () => {
+    const posterToken = await registerAndLogin('premium-poster2@example.com');
+    await User.updateOne(
+      { email: 'premium-poster2@example.com' },
+      { planTier: 'premium', planExpiresAt: new Date(Date.now() + 30 * 86_400_000), emailMarketingOptIn: true },
+    );
+
+    await request(app).post('/api/listings').set('Authorization', `Bearer ${posterToken}`).send(validListingPayload);
+    await flush();
+
+    expect(mockedSendNewListingEmail).not.toHaveBeenCalled();
+  });
+});
+
+describe('Listing quota (Free plan default)', () => {
+  it('allows up to the Free plan\'s 2-per-month limit', async () => {
+    const token = await registerAndLogin();
+    const first = await request(app).post('/api/listings').set('Authorization', `Bearer ${token}`).send(validListingPayload);
+    const second = await request(app).post('/api/listings').set('Authorization', `Bearer ${token}`).send(validListingPayload);
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+  });
+
+  it('blocks a 3rd listing in the same month with a clear upgrade message', async () => {
+    const token = await registerAndLogin();
+    await request(app).post('/api/listings').set('Authorization', `Bearer ${token}`).send(validListingPayload);
+    await request(app).post('/api/listings').set('Authorization', `Bearer ${token}`).send(validListingPayload);
+
+    const third = await request(app).post('/api/listings').set('Authorization', `Bearer ${token}`).send(validListingPayload);
+
+    expect(third.status).toBe(403);
+    expect(third.body.message).toMatch(/upgrade/i);
+  });
+
+  it('an active Premium plan is not capped', async () => {
+    const token = await registerAndLogin();
+    await User.updateOne(
+      { email: 'agent@example.com' },
+      { planTier: 'premium', planExpiresAt: new Date(Date.now() + 30 * 86_400_000) },
+    );
+
+    for (let i = 0; i < 4; i++) {
+      const res = await request(app)
+        .post('/api/listings')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...validListingPayload, title: `${validListingPayload.title} #${i}` });
+      expect(res.status).toBe(201);
+    }
+  });
+
+  it('an expired Premium plan is lazily treated as Free — capped again', async () => {
+    const token = await registerAndLogin();
+    await User.updateOne(
+      { email: 'agent@example.com' },
+      { planTier: 'premium', planExpiresAt: new Date(Date.now() - 1000) }, // already lapsed
+    );
+
+    await request(app).post('/api/listings').set('Authorization', `Bearer ${token}`).send(validListingPayload);
+    await request(app).post('/api/listings').set('Authorization', `Bearer ${token}`).send(validListingPayload);
+    const third = await request(app).post('/api/listings').set('Authorization', `Bearer ${token}`).send(validListingPayload);
+
+    expect(third.status).toBe(403);
+  });
+});
+
+describe('Search priority (paid plans rank first)', () => {
+  it('ranks an active Premium listing above a Free listing, regardless of recency', async () => {
+    const freeToken = await registerAndLogin('free-agent@example.com');
+    const premiumToken = await registerAndLogin('premium-agent@example.com');
+    await User.updateOne(
+      { email: 'premium-agent@example.com' },
+      { planTier: 'premium', planExpiresAt: new Date(Date.now() + 30 * 86_400_000) },
+    );
+
+    // Free listing created first (would normally sort first by recency).
+    await request(app)
+      .post('/api/listings')
+      .set('Authorization', `Bearer ${freeToken}`)
+      .send({ ...validListingPayload, title: 'Free agent listing' });
+    await request(app)
+      .post('/api/listings')
+      .set('Authorization', `Bearer ${premiumToken}`)
+      .send({ ...validListingPayload, title: 'Premium agent listing' });
+
+    const res = await request(app).get('/api/listings');
+
+    expect(res.body.listings[0].title).toBe('Premium agent listing');
+    expect(res.body.listings[0].featured).toBe(true);
+    expect(res.body.listings[1].title).toBe('Free agent listing');
+    expect(res.body.listings[1].featured).toBe(false);
+  });
+
+  it('does not let an expired paid plan jump the queue', async () => {
+    const freeToken = await registerAndLogin('free-agent2@example.com');
+    const lapsedToken = await registerAndLogin('lapsed-agent@example.com');
+    await User.updateOne(
+      { email: 'lapsed-agent@example.com' },
+      { planTier: 'premium', planExpiresAt: new Date(Date.now() - 1000) },
+    );
+
+    await request(app)
+      .post('/api/listings')
+      .set('Authorization', `Bearer ${lapsedToken}`)
+      .send({ ...validListingPayload, title: 'Lapsed premium listing' });
+    await request(app)
+      .post('/api/listings')
+      .set('Authorization', `Bearer ${freeToken}`)
+      .send({ ...validListingPayload, title: 'Newer free listing' });
+
+    const res = await request(app).get('/api/listings');
+
+    // Both effectively Free now, so plain recency order applies.
+    expect(res.body.listings[0].title).toBe('Newer free listing');
+    expect(res.body.listings[0].featured).toBe(false);
   });
 });
 

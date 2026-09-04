@@ -1,6 +1,8 @@
 import { Schema, model, Document, Types } from 'mongoose';
 import { Property } from './Property';
 import { Lead } from './Lead';
+import { PlanTier } from '../config/plans';
+import { getEffectivePlanTier } from '../services/plans/plan.service';
 
 export type UserRole = 'agent' | 'agency' | 'owner' | 'admin';
 export type VerificationStatus = 'unverified' | 'pending' | 'verified';
@@ -18,6 +20,24 @@ export interface IUser extends Document {
   // prioritization (Section 5: "inventory density per city").
   primaryLocation?: string;
   verificationStatus: VerificationStatus;
+  // Confirms the agent actually owns the email they registered with —
+  // deliberately separate from verificationStatus above, which is a
+  // different concept (agent-identity/KYC-style verification, still
+  // foundation-only with no real flow behind it). This one has a real,
+  // working flow: see modules/auth's verify-email / resend-verification.
+  emailVerified: boolean;
+  // Subscription state. planTier is "what they most recently purchased" —
+  // it's never proactively reverted on expiry (no cron sweep); every
+  // consumer calls plan.service.ts's getEffectivePlanTier(), which treats
+  // an expired paid plan as free lazily, at read time.
+  planTier: PlanTier;
+  planExpiresAt?: Date;
+  // Recipient-side opt-in for the "new listing" marketing email — distinct
+  // from whether *this* user's own listings trigger that email to others
+  // (that's automatic, gated on their plan's emailMarketingOnNewListing).
+  // Defaults to false: the live Privacy Policy promises no marketing email
+  // without an explicit opt-in, so this can never default to true.
+  emailMarketingOptIn: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -37,6 +57,10 @@ const userSchema = new Schema<IUser>(
       enum: ['unverified', 'pending', 'verified'],
       default: 'unverified',
     },
+    emailVerified: { type: Boolean, default: false },
+    planTier: { type: String, enum: ['free', 'basic', 'premium'], default: 'free' },
+    planExpiresAt: { type: Date },
+    emailMarketingOptIn: { type: Boolean, default: false },
   },
   { timestamps: true },
 );
@@ -50,6 +74,12 @@ const userSchema = new Schema<IUser>(
 // through this app's code). A document removed directly in the Atlas UI or
 // mongosh bypasses the app entirely, so nothing here runs for that case —
 // there's no way to hook a raw database operation from application code.
+// Deliberately does NOT include Payment — unlike Property/Lead (which are
+// just content, fine to fully remove), payment/transaction records are
+// financial history typically retained for accounting/dispute/audit
+// purposes even after the account itself is gone. A deleted user's
+// Payment rows are simply orphaned (their `user` ref points nowhere), not
+// missing.
 async function cascadeDeleteForUserIds(userIds: Types.ObjectId[]): Promise<void> {
   if (userIds.length === 0) return;
   await Promise.all([
@@ -88,6 +118,13 @@ export function toPublicUser(user: IUser) {
     businessName: user.businessName,
     primaryLocation: user.primaryLocation,
     verificationStatus: user.verificationStatus,
+    emailVerified: user.emailVerified,
+    // The *effective* tier (getEffectivePlanTier), not the raw stored
+    // field — showing "Premium" to a user whose pass quietly lapsed would
+    // be actively misleading.
+    planTier: getEffectivePlanTier(user),
+    planExpiresAt: user.planExpiresAt,
+    emailMarketingOptIn: user.emailMarketingOptIn,
     createdAt: user.createdAt,
   };
 }

@@ -1,8 +1,22 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
+import { ApiError } from '../../utils/ApiError';
 import { toPublicUser } from '../../models/User';
-import { forgotPasswordSchema, loginSchema, registerSchema, resetPasswordSchema } from './auth.validation';
-import { loginUser, registerUser, requestPasswordReset, resetPassword } from './auth.service';
+import {
+  forgotPasswordSchema,
+  loginSchema,
+  registerSchema,
+  resetPasswordSchema,
+  verifyEmailSchema,
+} from './auth.validation';
+import {
+  loginUser,
+  registerUser,
+  requestPasswordReset,
+  resendVerificationEmail,
+  resetPassword,
+  verifyEmail,
+} from './auth.service';
 
 export const register = asyncHandler(async (req: Request, res: Response) => {
   const input = registerSchema.parse(req.body);
@@ -35,4 +49,22 @@ export const resetPasswordHandler = asyncHandler(async (req: Request, res: Respo
   const input = resetPasswordSchema.parse(req.body);
   await resetPassword(input.token, input.newPassword);
   res.status(200).json({ message: 'Password updated. You can now log in.' });
+});
+
+export const verifyEmailHandler = asyncHandler(async (req: Request, res: Response) => {
+  const input = verifyEmailSchema.parse(req.body);
+  await verifyEmail(input.token);
+  res.status(200).json({ message: 'Email verified.' });
+});
+
+// Authenticated (unlike forgot-password) — resending targets the signed-in
+// user's own email, not an arbitrary address someone could spam by
+// guessing/enumerating accounts.
+export const resendVerification = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw ApiError.unauthorized();
+  const { alreadyVerified } = await resendVerificationEmail(req.user.sub);
+  res.status(200).json({
+    message: alreadyVerified ? 'Your email is already verified.' : 'Verification email sent.',
+    alreadyVerified,
+  });
 });
