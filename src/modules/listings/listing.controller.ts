@@ -2,7 +2,14 @@ import { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { ApiError } from '../../utils/ApiError';
 import { extractListingDraft } from '../../services/ai/extraction.service';
-import { createListing, getListingById, getMyListings, searchListings, updateListing } from './listing.service';
+import {
+  createListing,
+  getListingById,
+  getListingContact,
+  getMyListings,
+  searchListings,
+  updateListing,
+} from './listing.service';
 import {
   createListingSchema,
   draftRequestSchema,
@@ -28,6 +35,12 @@ export const search = asyncHandler(async (req: Request, res: Response) => {
 export const getById = asyncHandler(async (req: Request, res: Response) => {
   const listing = await getListingById(req.params.id);
   res.status(200).json({ listing });
+});
+
+// Public — no auth. Returns the listing agent's name/email/phone/business.
+export const getContact = asyncHandler(async (req: Request, res: Response) => {
+  const contact = await getListingContact(req.params.id);
+  res.status(200).json({ contact });
 });
 
 export const create = asyncHandler(async (req: Request, res: Response) => {

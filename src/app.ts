@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import { env } from './config/env';
+import { ApiError } from './utils/ApiError';
 import { authRouter } from './modules/auth/auth.routes';
 import { listingRouter } from './modules/listings/listing.routes';
 import { userRouter } from './modules/users/user.routes';
@@ -27,7 +28,12 @@ const corsOrigin: cors.CorsOptions['origin'] =
         if (!origin || /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
           callback(null, true);
         } else {
-          callback(new Error('Not allowed by CORS'));
+          // A plain Error here falls through to the generic error handler's
+          // 500 branch, masking a routine "wrong/missing origin" rejection
+          // as an opaque server failure — exactly the kind of thing that
+          // makes a misconfigured NODE_ENV/WEB_ORIGIN look like a backend
+          // outage instead of what it actually is.
+          callback(ApiError.forbidden('Not allowed by CORS'));
         }
       };
 

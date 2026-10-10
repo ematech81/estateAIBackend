@@ -131,7 +131,7 @@ export function toPublicUser(user: IUser) {
 
 /**
  * Public agent-directory shape — deliberately excludes email/phone. Contact
- * goes through a listing's lead-capture form, not a public directory
+ * details are only revealed via a listing's /contact endpoint, not a public directory
  * (Section 13.5: never expose sensitive agent/user info unnecessarily).
  */
 export function toPublicAgent(user: IUser) {

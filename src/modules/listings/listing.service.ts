@@ -209,6 +209,27 @@ export async function getListingById(id: string) {
   return toPublicListing(listing);
 }
 
+// Agent contact details for a listing. Deliberately a separate call from
+// getListingById — email/phone never ride along on the public listing/search
+// payloads, so they only leave the API when a seeker explicitly asks for them
+// (after accepting the "EstateAI is only a platform" notice in the web UI).
+export async function getListingContact(id: string) {
+  if (!isValidObjectId(id)) {
+    throw ApiError.notFound('Listing not found');
+  }
+
+  const listing = await Property.findOne({ _id: id, status: { $in: ['pending_review', 'active'] } }).populate<{
+    createdBy: { name: string; email: string; phone?: string; businessName?: string } | null;
+  }>('createdBy', 'name email phone businessName');
+
+  if (!listing || !listing.createdBy) {
+    throw ApiError.notFound('Listing not found');
+  }
+
+  const { name, email, phone, businessName } = listing.createdBy;
+  return { name, email, phone, businessName };
+}
+
 export async function updateListing(userId: string, listingId: string, input: UpdateListingInput) {
   const listing = await Property.findById(listingId);
   if (!listing) {

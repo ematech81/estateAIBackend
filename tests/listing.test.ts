@@ -510,3 +510,49 @@ describe('PATCH /api/listings/:id', () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe('GET /api/listings/:id/contact', () => {
+  async function createPublishedListing(token: string) {
+    const res = await request(app)
+      .post('/api/listings')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: 'Newly built 3 bedroom duplex, Lekki Phase 1',
+        description: 'Newly built 3 bedroom duplex at Lekki Phase 1 with BQ and parking.',
+        listingType: 'rent',
+        propertyType: 'duplex',
+        price: { amount: 8_000_000, currency: 'NGN', period: 'yearly' },
+        location: { country: 'Nigeria', state: 'Lagos', city: 'Lagos', district: 'Lekki Phase 1' },
+        specifications: { bedrooms: 3, amenities: [] },
+      });
+    return res.body.listing._id as string;
+  }
+
+  it('returns the agent name/email/phone without auth, and keeps them out of the public listing', async () => {
+    const reg = await request(app).post('/api/auth/register').send({
+      email: 'agent@example.com',
+      password: 'supersecret123',
+      name: 'Chinedu Okafor',
+      role: 'agent',
+      phone: '+2348012345678',
+    });
+    const id = await createPublishedListing(reg.body.token);
+
+    const contact = await request(app).get(`/api/listings/${id}/contact`);
+    expect(contact.status).toBe(200);
+    expect(contact.body.contact).toEqual({
+      name: 'Chinedu Okafor',
+      email: 'agent@example.com',
+      phone: '+2348012345678',
+    });
+
+    const listing = await request(app).get(`/api/listings/${id}`);
+    expect(JSON.stringify(listing.body)).not.toContain('agent@example.com');
+    expect(JSON.stringify(listing.body)).not.toContain('+2348012345678');
+  });
+
+  it('404s for an unknown or malformed id', async () => {
+    expect((await request(app).get('/api/listings/not-an-id/contact')).status).toBe(404);
+    expect((await request(app).get('/api/listings/64b64b64b64b64b64b64b64b/contact')).status).toBe(404);
+  });
+});
