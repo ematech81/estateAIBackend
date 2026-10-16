@@ -42,6 +42,7 @@ export async function deleteAccount(id: string) {
 // Excludes admin (not a public role).
 const PUBLIC_AGENT_FILTER = {
   role: { $in: ['agent', 'agency', 'owner'] },
+  suspended: { $ne: true },
 };
 
 export async function listPublicAgents({ page, limit }: ListAgentsInput) {

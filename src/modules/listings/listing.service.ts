@@ -11,7 +11,7 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-type PopulatedCreator = { verificationStatus?: string; planTier?: PlanTier; planExpiresAt?: Date };
+type PopulatedCreator = { verificationStatus?: string; planTier?: PlanTier; planExpiresAt?: Date; suspended?: boolean };
 
 // Shared by searchListings and getListingById — strips createdBy down to
 // the derived fields the UI/SEO logic actually needs (Section 13.5: never
@@ -36,7 +36,7 @@ function toPublicListing(listing: WithPopulatedCreator) {
   };
 }
 
-const CREATOR_PLAN_FIELDS = 'verificationStatus planTier planExpiresAt';
+const CREATOR_PLAN_FIELDS = 'verificationStatus planTier planExpiresAt suspended';
 
 export async function createListing(userId: string, input: CreateListingInput) {
   const user = await User.findById(userId);
@@ -133,18 +133,24 @@ export async function searchListings({
   // results" sorts by the LISTING OWNER's plan, a joined field — Mongoose
   // can't sort by a populated field's value without one. Paid (effective,
   // non-expired) listings sort first, then most-recent within each tier.
+  // Listings of a suspended agent are hidden along with their account.
+  const visibleListings = [
+    { $match: filter },
+    {
+      $lookup: {
+        from: 'users',
+        localField: 'createdBy',
+        foreignField: '_id',
+        as: 'creator',
+      },
+    },
+    { $unwind: '$creator' },
+    { $match: { 'creator.suspended': { $ne: true } } },
+  ];
+
   const [listings, total] = await Promise.all([
     Property.aggregate([
-      { $match: filter },
-      {
-        $lookup: {
-          from: 'users',
-          localField: 'createdBy',
-          foreignField: '_id',
-          as: 'creator',
-        },
-      },
-      { $unwind: '$creator' },
+      ...visibleListings,
       {
         $addFields: {
           agentVerified: { $eq: ['$creator.verificationStatus', 'verified'] },
@@ -176,7 +182,7 @@ export async function searchListings({
       { $limit: limit },
       { $project: { creator: 0, _planActive: 0, _searchPriority: 0 } },
     ]),
-    Property.countDocuments(filter),
+    Property.aggregate<{ n: number }>([...visibleListings, { $count: 'n' }]).then((rows) => rows[0]?.n ?? 0),
   ]);
 
   return {
@@ -202,7 +208,7 @@ export async function getListingById(id: string) {
     createdBy: PopulatedCreator;
   }>('createdBy', CREATOR_PLAN_FIELDS);
 
-  if (!listing) {
+  if (!listing || listing.createdBy?.suspended) {
     throw ApiError.notFound('Listing not found');
   }
 
@@ -219,10 +225,10 @@ export async function getListingContact(id: string) {
   }
 
   const listing = await Property.findOne({ _id: id, status: { $in: ['pending_review', 'active'] } }).populate<{
-    createdBy: { name: string; email: string; phone?: string; businessName?: string } | null;
-  }>('createdBy', 'name email phone businessName');
+    createdBy: { name: string; email: string; phone?: string; businessName?: string; suspended?: boolean } | null;
+  }>('createdBy', 'name email phone businessName suspended');
 
-  if (!listing || !listing.createdBy) {
+  if (!listing || !listing.createdBy || listing.createdBy.suspended) {
     throw ApiError.notFound('Listing not found');
   }
 
@@ -260,6 +266,10 @@ export async function setListingAvailability(userId: string, listingId: string, 
   }
   if (listing.status === 'draft') {
     throw ApiError.badRequest('Drafts are not published, so they cannot be marked available or unavailable');
+  }
+  // Taken down by an admin for moderation — only an admin can put it back.
+  if (listing.unavailableReason === 'removed') {
+    throw ApiError.forbidden('This listing was removed by EstateAI. Contact support if you think this is a mistake.');
   }
 
   if (available) {

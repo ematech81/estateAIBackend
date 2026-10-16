@@ -50,18 +50,17 @@ export async function sendPasswordResetEmail(toEmail: string, toName: string, re
   );
 }
 
-export async function sendEmailVerificationEmail(toEmail: string, toName: string, verifyUrl: string): Promise<void> {
+export async function sendEmailVerificationEmail(toEmail: string, toName: string, code: string): Promise<void> {
   await sendTransactionalEmail(
     toEmail,
     toName,
-    'Verify your EstateAI email address',
-    emailButtonHtml({
+    `${code} is your EstateAI verification code`,
+    emailCodeHtml({
       heading: 'Verify your email',
       name: toName,
-      body: 'One last step — confirm this is really your email address so we know where to reach you. This link expires in 24 hours.',
-      buttonLabel: 'Verify Email',
-      url: verifyUrl,
-      footnote: "If you didn't create an EstateAI account, you can safely ignore this email.",
+      body: 'Enter this code in EstateAI to confirm this is really your email address. It expires in 10 minutes.',
+      code,
+      footnote: "If you didn't create an EstateAI account, you can safely ignore this email. Never share this code with anyone.",
     }),
   );
 }
@@ -119,6 +118,21 @@ function emailButtonHtml(params: {
         Or paste this link into your browser: <br />
         <a href="${url}" style="color:#0F172A;">${url}</a>
       </p>
+    </div>
+  `;
+}
+
+function emailCodeHtml(params: { heading: string; name: string; body: string; code: string; footnote: string }): string {
+  const { heading, name, body, code, footnote } = params;
+  return `
+    <div style="font-family: Arial, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 24px; color: #0B1C30;">
+      <h1 style="font-size: 20px; margin-bottom: 16px;">${escapeHtml(heading)}</h1>
+      <p style="font-size: 15px; line-height: 1.5;">Hi ${escapeHtml(name)},</p>
+      <p style="font-size: 15px; line-height: 1.5;">${escapeHtml(body)}</p>
+      <p style="margin: 24px 0; text-align: center;">
+        <span style="display:inline-block; background:#F1F5F9; border-radius:8px; padding:14px 28px; font-family: 'Courier New', monospace; font-size:32px; font-weight:bold; letter-spacing:8px; color:#0F172A;">${escapeHtml(code)}</span>
+      </p>
+      <p style="font-size: 13px; color: #45464d; line-height: 1.5;">${escapeHtml(footnote)}</p>
     </div>
   `;
 }

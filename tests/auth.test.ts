@@ -2,7 +2,7 @@ import request from 'supertest';
 import { createApp } from '../src/app';
 import { startTestDB, stopTestDB, clearTestDB } from './helpers/testDb';
 import { PasswordResetToken } from '../src/models/PasswordResetToken';
-import { EmailVerificationToken } from '../src/models/EmailVerificationToken';
+import { EmailVerificationOtp } from '../src/models/EmailVerificationOtp';
 import * as emailService from '../src/services/email/email.service';
 
 // Mocked so these tests never hit the real Brevo API (or depend on the
@@ -15,6 +15,7 @@ const mockedSendPasswordResetEmail = emailService.sendPasswordResetEmail as jest
 const mockedSendEmailVerificationEmail = emailService.sendEmailVerificationEmail as jest.MockedFunction<
   typeof emailService.sendEmailVerificationEmail
 >;
+
 
 function extractTokenFromUrl(url: string): string {
   return new URL(url).searchParams.get('token') as string;
@@ -223,101 +224,154 @@ describe('POST /api/auth/reset-password', () => {
   });
 });
 
-describe('email verification', () => {
-  async function registerAndGetVerificationToken(email = validAgent.email): Promise<string> {
-    mockedSendEmailVerificationEmail.mockResolvedValueOnce(undefined);
-    await request(app).post('/api/auth/register').send({ ...validAgent, email });
-    const verifyUrl = mockedSendEmailVerificationEmail.mock.calls[0][2];
-    return extractTokenFromUrl(verifyUrl);
-  }
+describe('email verification (OTP)', () => {
+  const authed = (token: string) => ({ Authorization: `Bearer ${token}` });
 
-  it('sends a verification email on registration, and the new account starts unverified', async () => {
+  // Registers an agent and returns their JWT plus the code "emailed" to them
+  // (captured from the mocked email service).
+  async function registerAndGetCode(email = validAgent.email) {
+    const res = await request(app).post('/api/auth/register').send({ ...validAgent, email });
+    const code = mockedSendEmailVerificationEmail.mock.calls[0][2];
+    return { token: res.body.token as string, code };
+  }
+  const verify = (token: string, code: string) =>
+    request(app).post('/api/auth/verify-email').set(authed(token)).send({ code });
+  const isVerified = async (token: string) =>
+    (await request(app).get('/api/users/me').set(authed(token))).body.user.emailVerified as boolean;
+
+  it('emails an alphanumeric code on registration, and the new account starts unverified', async () => {
     const res = await request(app).post('/api/auth/register').send(validAgent);
 
     expect(res.status).toBe(201);
     expect(res.body.user.emailVerified).toBe(false);
     expect(mockedSendEmailVerificationEmail).toHaveBeenCalledTimes(1);
     expect(mockedSendEmailVerificationEmail.mock.calls[0][0]).toBe(validAgent.email);
+    const code = mockedSendEmailVerificationEmail.mock.calls[0][2];
+    expect(code).toMatch(/^[A-Z2-9]{6}$/);
+  });
+
+  it('generates codes that always contain both letters and digits', async () => {
+    for (let i = 0; i < 25; i++) {
+      mockedSendEmailVerificationEmail.mockClear();
+      await request(app).post('/api/auth/register').send({ ...validAgent, email: `agent${i}@example.com` });
+      const code = mockedSendEmailVerificationEmail.mock.calls[0][2];
+      expect(code).toMatch(/^(?=.*[A-Z])(?=.*[2-9])[A-Z2-9]{6}$/);
+    }
   });
 
   it('registration still succeeds even if the verification email fails to send', async () => {
     mockedSendEmailVerificationEmail.mockRejectedValueOnce(new Error('Brevo is down'));
-
     const res = await request(app).post('/api/auth/register').send(validAgent);
-
     expect(res.status).toBe(201);
   });
 
   describe('POST /api/auth/verify-email', () => {
-    it('marks the account verified with a valid token', async () => {
-      const token = await registerAndGetVerificationToken();
+    it('requires auth', async () => {
+      const res = await request(app).post('/api/auth/verify-email').send({ code: 'ABC234' });
+      expect(res.status).toBe(401);
+    });
 
-      const res = await request(app).post('/api/auth/verify-email').send({ token });
+    it('marks the account verified with the right code', async () => {
+      const { token, code } = await registerAndGetCode();
+      const res = await verify(token, code);
       expect(res.status).toBe(200);
-
-      const me = await request(app)
-        .post('/api/auth/login')
-        .send({ email: validAgent.email, password: validAgent.password });
-      const profile = await request(app).get('/api/users/me').set('Authorization', `Bearer ${me.body.token}`);
-      expect(profile.body.user.emailVerified).toBe(true);
+      expect(await isVerified(token)).toBe(true);
     });
 
-    it('rejects an invalid/garbage token', async () => {
-      const res = await request(app).post('/api/auth/verify-email').send({ token: 'not-a-real-token' });
+    it('accepts the code in lowercase and with spaces or dashes', async () => {
+      const { token, code } = await registerAndGetCode();
+      const res = await verify(token, `${code.slice(0, 3)} - ${code.slice(3)}`.toLowerCase());
+      expect(res.status).toBe(200);
+      expect(await isVerified(token)).toBe(true);
+    });
+
+    it('rejects a wrong code, says how many attempts are left, and stays unverified', async () => {
+      const { token } = await registerAndGetCode();
+      const res = await verify(token, 'ZZZZZ9');
       expect(res.status).toBe(400);
+      expect(res.body.message).toMatch(/4 attempts left/);
+      expect(await isVerified(token)).toBe(false);
     });
 
-    it('rejects reusing an already-redeemed token', async () => {
-      const token = await registerAndGetVerificationToken();
+    it('locks the code after 5 wrong attempts, even if the right code is then entered', async () => {
+      const { token, code } = await registerAndGetCode();
+      for (let i = 0; i < 4; i++) {
+        expect((await verify(token, 'ZZZZZ9')).status).toBe(400);
+      }
+      expect((await verify(token, 'ZZZZZ9')).status).toBe(429);
 
-      await request(app).post('/api/auth/verify-email').send({ token });
-      const secondAttempt = await request(app).post('/api/auth/verify-email').send({ token });
-
-      expect(secondAttempt.status).toBe(400);
+      const afterLock = await verify(token, code);
+      expect(afterLock.status).toBe(400);
+      expect(await isVerified(token)).toBe(false);
     });
 
-    it('rejects an expired token', async () => {
-      const token = await registerAndGetVerificationToken();
-      await EmailVerificationToken.updateMany({}, { expiresAt: new Date(Date.now() - 1000) });
+    it('rejects an expired code', async () => {
+      const { token, code } = await registerAndGetCode();
+      await EmailVerificationOtp.updateMany({}, { expiresAt: new Date(Date.now() - 1000) });
+      expect((await verify(token, code)).status).toBe(400);
+      expect(await isVerified(token)).toBe(false);
+    });
 
-      const res = await request(app).post('/api/auth/verify-email').send({ token });
+    it('does not store the code in plain text', async () => {
+      const { code } = await registerAndGetCode();
+      const record = await EmailVerificationOtp.findOne({});
+      expect(record?.codeHash).toBeDefined();
+      expect(record?.codeHash).not.toContain(code);
+    });
+
+    it('cannot verify one account with another account code', async () => {
+      const a = await registerAndGetCode('a@example.com');
+      mockedSendEmailVerificationEmail.mockClear();
+      const b = await registerAndGetCode('b@example.com');
+
+      expect((await verify(b.token, a.code)).status).toBe(400);
+      expect(await isVerified(b.token)).toBe(false);
+    });
+
+    it('rejects a missing code', async () => {
+      const { token } = await registerAndGetCode();
+      const res = await request(app).post('/api/auth/verify-email').set(authed(token)).send({});
       expect(res.status).toBe(400);
     });
   });
 
   describe('POST /api/auth/resend-verification', () => {
     it('requires auth', async () => {
-      const res = await request(app).post('/api/auth/resend-verification');
-      expect(res.status).toBe(401);
+      expect((await request(app).post('/api/auth/resend-verification')).status).toBe(401);
     });
 
-    it('resends to the signed-in user\'s own email for an unverified account', async () => {
-      mockedSendEmailVerificationEmail.mockResolvedValue(undefined);
-      const registerRes = await request(app).post('/api/auth/register').send(validAgent);
-      mockedSendEmailVerificationEmail.mockClear(); // ignore the registration-time send
+    it('enforces a cooldown right after the first code was sent', async () => {
+      const { token } = await registerAndGetCode();
+      mockedSendEmailVerificationEmail.mockClear();
 
-      const res = await request(app)
-        .post('/api/auth/resend-verification')
-        .set('Authorization', `Bearer ${registerRes.body.token}`);
+      const res = await request(app).post('/api/auth/resend-verification').set(authed(token));
+      expect(res.status).toBe(429);
+      expect(res.body.message).toMatch(/wait/i);
+      expect(mockedSendEmailVerificationEmail).not.toHaveBeenCalled();
+    });
 
+    it('sends a fresh code after the cooldown, which replaces the old one', async () => {
+      const { token } = await registerAndGetCode();
+      mockedSendEmailVerificationEmail.mockClear();
+      await EmailVerificationOtp.updateMany({}, { lastSentAt: new Date(Date.now() - 61_000) });
+
+      const res = await request(app).post('/api/auth/resend-verification').set(authed(token));
       expect(res.status).toBe(200);
       expect(res.body.alreadyVerified).toBe(false);
       expect(mockedSendEmailVerificationEmail).toHaveBeenCalledTimes(1);
       expect(mockedSendEmailVerificationEmail.mock.calls[0][0]).toBe(validAgent.email);
+      const newCode = mockedSendEmailVerificationEmail.mock.calls[0][2];
+
+      expect((await verify(token, newCode)).status).toBe(200);
+      expect(await isVerified(token)).toBe(true);
     });
 
     it('is a no-op that reports alreadyVerified for an already-verified account', async () => {
-      const token = await registerAndGetVerificationToken();
-      const loginRes = await request(app)
-        .post('/api/auth/login')
-        .send({ email: validAgent.email, password: validAgent.password });
-      await request(app).post('/api/auth/verify-email').send({ token });
+      const { token, code } = await registerAndGetCode();
+      await verify(token, code);
       mockedSendEmailVerificationEmail.mockClear();
 
-      const res = await request(app)
-        .post('/api/auth/resend-verification')
-        .set('Authorization', `Bearer ${loginRes.body.token}`);
-
+      const res = await request(app).post('/api/auth/resend-verification').set(authed(token));
       expect(res.status).toBe(200);
       expect(res.body.alreadyVerified).toBe(true);
       expect(mockedSendEmailVerificationEmail).not.toHaveBeenCalled();

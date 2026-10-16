@@ -51,9 +51,12 @@ export const resetPasswordHandler = asyncHandler(async (req: Request, res: Respo
   res.status(200).json({ message: 'Password updated. You can now log in.' });
 });
 
+// Authenticated — the code is tied to the signed-in account, so guessing
+// attempts are counted per account rather than per anonymous caller.
 export const verifyEmailHandler = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw ApiError.unauthorized();
   const input = verifyEmailSchema.parse(req.body);
-  await verifyEmail(input.token);
+  await verifyEmail(req.user.sub, input.code);
   res.status(200).json({ message: 'Email verified.' });
 });
 
@@ -64,7 +67,7 @@ export const resendVerification = asyncHandler(async (req: Request, res: Respons
   if (!req.user) throw ApiError.unauthorized();
   const { alreadyVerified } = await resendVerificationEmail(req.user.sub);
   res.status(200).json({
-    message: alreadyVerified ? 'Your email is already verified.' : 'Verification email sent.',
+    message: alreadyVerified ? 'Your email is already verified.' : 'We sent a new code to your email.',
     alreadyVerified,
   });
 });

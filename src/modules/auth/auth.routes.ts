@@ -15,5 +15,5 @@ authRouter.post('/register', register);
 authRouter.post('/login', login);
 authRouter.post('/forgot-password', forgotPassword);
 authRouter.post('/reset-password', resetPasswordHandler);
-authRouter.post('/verify-email', verifyEmailHandler);
+authRouter.post('/verify-email', requireAuth, verifyEmailHandler);
 authRouter.post('/resend-verification', requireAuth, resendVerification);

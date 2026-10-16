@@ -29,6 +29,7 @@ export const resetPasswordSchema = z.object({
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 
 export const verifyEmailSchema = z.object({
-  token: z.string().min(1),
+  // Typed by hand, so spaces/dashes/lowercase are tolerated — normalised server-side.
+  code: z.string().trim().min(4).max(20),
 });
 export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;

@@ -8,6 +8,7 @@ import {
   listAllPostsForAdmin,
   updateBlogPost,
 } from '../blog/blog.service';
+import { logAdminAction } from '../../models/AdminAction';
 import { createBlogPostSchema, updateBlogPostSchema } from '../blog/blog.validation';
 
 // All five behind requireAuth + requireAdmin (see blogAdmin.routes.ts).
@@ -28,16 +29,22 @@ export const create = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw ApiError.unauthorized();
   const input = createBlogPostSchema.parse(req.body);
   const post = await createBlogPost(req.user.sub, input);
+  await logAdminAction({ adminId: req.user.sub, type: 'blog.create', targetType: 'blog', targetId: post._id, targetLabel: post.title });
   res.status(201).json({ post });
 });
 
 export const update = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw ApiError.unauthorized();
   const input = updateBlogPostSchema.parse(req.body);
   const post = await updateBlogPost(req.params.id, input);
+  await logAdminAction({ adminId: req.user.sub, type: 'blog.update', targetType: 'blog', targetId: post._id, targetLabel: post.title });
   res.status(200).json({ post });
 });
 
 export const remove = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw ApiError.unauthorized();
+  const existing = await getPostByIdForAdmin(req.params.id);
   await deleteBlogPost(req.params.id);
+  await logAdminAction({ adminId: req.user.sub, type: 'blog.delete', targetType: 'blog', targetId: existing._id, targetLabel: existing.title });
   res.status(204).send();
 });

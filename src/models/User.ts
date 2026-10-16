@@ -39,6 +39,12 @@ export interface IUser extends Document {
   // Defaults to false: the live Privacy Policy promises no marketing email
   // without an explicit opt-in, so this can never default to true.
   emailMarketingOptIn: boolean;
+  // Set by an admin (see modules/admin). A suspended account cannot log in or
+  // use an existing token, and its listings and agent profile disappear from
+  // the public site. Reversible; nothing is deleted.
+  suspended: boolean;
+  suspendedAt?: Date;
+  suspensionReason?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -62,6 +68,9 @@ const userSchema = new Schema<IUser>(
     planTier: { type: String, enum: ['free', 'basic', 'premium'], default: 'free' },
     planExpiresAt: { type: Date },
     emailMarketingOptIn: { type: Boolean, default: false },
+    suspended: { type: Boolean, default: false },
+    suspendedAt: { type: Date },
+    suspensionReason: { type: String, trim: true },
   },
   { timestamps: true },
 );

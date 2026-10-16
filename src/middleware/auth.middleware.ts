@@ -2,7 +2,7 @@ import { NextFunction, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 import { ApiError } from '../utils/ApiError';
-import { UserRole } from '../models/User';
+import { User, UserRole } from '../models/User';
 
 export interface AuthTokenPayload {
   sub: string; // user id
@@ -25,13 +25,26 @@ export function requireAuth(req: Request, _res: Response, next: NextFunction): v
   }
 
   const token = header.slice('Bearer '.length);
+  let payload: AuthTokenPayload;
   try {
-    const payload = jwt.verify(token, env.JWT_SECRET) as AuthTokenPayload;
-    req.user = payload;
-    next();
+    payload = jwt.verify(token, env.JWT_SECRET) as AuthTokenPayload;
   } catch {
     throw ApiError.unauthorized('Invalid or expired token');
   }
+
+  // A JWT stays valid until it expires, so a suspension has to be checked
+  // against the database — otherwise a suspended account would keep working
+  // for up to a week. One indexed lookup per authenticated request.
+  User.exists({ _id: payload.sub, suspended: true })
+    .then((suspended) => {
+      if (suspended) {
+        next(ApiError.forbidden('Your account has been suspended. Contact EstateAI support.'));
+        return;
+      }
+      req.user = payload;
+      next();
+    })
+    .catch(next);
 }
 
 // Always used after requireAuth (which populates req.user from the JWT) —

@@ -8,6 +8,7 @@ import { authRouter } from './modules/auth/auth.routes';
 import { listingRouter } from './modules/listings/listing.routes';
 import { userRouter } from './modules/users/user.routes';
 import { eventRouter } from './modules/events/event.routes';
+import { adminRouter } from './modules/admin/admin.routes';
 import { uploadRouter } from './modules/uploads/upload.routes';
 import { analyticsRouter } from './modules/analytics/analytics.routes';
 import { blogRouter } from './modules/blog/blog.routes';
@@ -15,7 +16,9 @@ import { blogAdminRouter } from './modules/blogAdmin/blogAdmin.routes';
 import { korapayWebhookRouter, paymentRouter } from './modules/payments/payment.routes';
 import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 
-// In production, only the configured WEB_ORIGIN is allowed. In development,
+// In production, only the configured origins are allowed: WEB_ORIGIN (the
+// public site) and ADMIN_ORIGIN (the admin dashboard), either of which may
+// be a comma-separated list. In development,
 // accept any localhost/127.0.0.1 origin regardless of port — Next.js's dev
 // server auto-picks the next free port if its default is already taken
 // (e.g. by an unrelated project also running locally), so pinning WEB_ORIGIN
@@ -23,7 +26,10 @@ import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 // security decision.
 const corsOrigin: cors.CorsOptions['origin'] =
   env.NODE_ENV === 'production'
-    ? env.WEB_ORIGIN
+    ? [env.WEB_ORIGIN, env.ADMIN_ORIGIN ?? '']
+        .flatMap((o) => o.split(','))
+        .map((o) => o.trim())
+        .filter(Boolean)
     : (origin, callback) => {
         if (!origin || /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
           callback(null, true);
@@ -53,6 +59,7 @@ export function createApp(): Express {
   app.use('/api/listings', listingRouter);
   app.use('/api/users', userRouter);
   app.use('/api/events', eventRouter);
+  app.use('/api/admin', adminRouter);
   app.use('/api/uploads', uploadRouter);
   app.use('/api/analytics', analyticsRouter);
   app.use('/api/blog', blogRouter);
