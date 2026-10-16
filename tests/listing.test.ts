@@ -511,7 +511,7 @@ describe('PATCH /api/listings/:id', () => {
   });
 });
 
-describe('GET /api/listings/:id/contact', () => {
+describe('POST /api/listings/:id/contact', () => {
   async function createPublishedListing(token: string) {
     const res = await request(app)
       .post('/api/listings')
@@ -538,7 +538,7 @@ describe('GET /api/listings/:id/contact', () => {
     });
     const id = await createPublishedListing(reg.body.token);
 
-    const contact = await request(app).get(`/api/listings/${id}/contact`);
+    const contact = await request(app).post(`/api/listings/${id}/contact`).send({ visitorId: 'visitor-abc-123' });
     expect(contact.status).toBe(200);
     expect(contact.body.contact).toEqual({
       name: 'Chinedu Okafor',
@@ -552,7 +552,12 @@ describe('GET /api/listings/:id/contact', () => {
   });
 
   it('404s for an unknown or malformed id', async () => {
-    expect((await request(app).get('/api/listings/not-an-id/contact')).status).toBe(404);
-    expect((await request(app).get('/api/listings/64b64b64b64b64b64b64b64b/contact')).status).toBe(404);
+    const body = { visitorId: 'visitor-abc-123' };
+    expect((await request(app).post('/api/listings/not-an-id/contact').send(body)).status).toBe(404);
+    expect((await request(app).post('/api/listings/64b64b64b64b64b64b64b64b/contact').send(body)).status).toBe(404);
+  });
+
+  it('rejects a request with no visitorId', async () => {
+    expect((await request(app).post('/api/listings/64b64b64b64b64b64b64b64b/contact').send({})).status).toBe(400);
   });
 });

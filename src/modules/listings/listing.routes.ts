@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth } from '../../middleware/auth.middleware';
+import { optionalAuth, requireAuth } from '../../middleware/auth.middleware';
 import { create, generateDraft, getById, getContact, listMine, search, update } from './listing.controller';
 
 export const listingRouter = Router();
@@ -9,7 +9,7 @@ export const listingRouter = Router();
 listingRouter.get('/', search);
 listingRouter.get('/mine', requireAuth, listMine);
 listingRouter.get('/:id', getById);
-listingRouter.get('/:id/contact', getContact);
+listingRouter.post('/:id/contact', optionalAuth, getContact);
 
 // Authenticated.
 listingRouter.post('/draft', requireAuth, generateDraft);

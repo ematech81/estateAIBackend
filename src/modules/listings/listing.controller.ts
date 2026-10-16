@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { ApiError } from '../../utils/ApiError';
+import { recordEvent } from '../events/event.service';
+import { contactRequestSchema } from '../events/event.validation';
 import { extractListingDraft } from '../../services/ai/extraction.service';
 import {
   createListing,
@@ -37,9 +39,18 @@ export const getById = asyncHandler(async (req: Request, res: Response) => {
   res.status(200).json({ listing });
 });
 
-// Public — no auth. Returns the listing agent's name/email/phone/business.
+// Public — no auth (optionalAuth only so an agent's own preview isn't
+// counted). A POST, not a GET, because handing out the agent's details is
+// itself a tracked action: it records a `contact_reveal` event.
 export const getContact = asyncHandler(async (req: Request, res: Response) => {
+  const { visitorId } = contactRequestSchema.parse(req.body);
   const contact = await getListingContact(req.params.id);
+  try {
+    await recordEvent({ propertyId: req.params.id, type: 'contact_reveal', visitorId, viewerId: req.user?.sub });
+  } catch (err) {
+    // Analytics must never stop a seeker from getting the contact details.
+    console.error('Recording contact_reveal failed:', err);
+  }
   res.status(200).json({ contact });
 });
 

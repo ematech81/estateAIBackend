@@ -47,3 +47,18 @@ export function requireAdmin(req: Request, _res: Response, next: NextFunction): 
   }
   next();
 }
+
+// For public routes that behave slightly differently for a logged-in agent
+// (e.g. not counting their own views). A missing or bad token is simply
+// treated as "anonymous visitor" — never an error.
+export function optionalAuth(req: Request, _res: Response, next: NextFunction): void {
+  const header = req.headers.authorization;
+  if (header && header.startsWith('Bearer ')) {
+    try {
+      req.user = jwt.verify(header.slice('Bearer '.length), env.JWT_SECRET) as AuthTokenPayload;
+    } catch {
+      // ignore — treat as anonymous
+    }
+  }
+  next();
+}

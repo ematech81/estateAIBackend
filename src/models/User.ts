@@ -1,6 +1,7 @@
 import { Schema, model, Document, Types } from 'mongoose';
 import { Property } from './Property';
 import { Lead } from './Lead';
+import { PropertyEvent } from './PropertyEvent';
 import { PlanTier } from '../config/plans';
 import { getEffectivePlanTier } from '../services/plans/plan.service';
 
@@ -85,6 +86,7 @@ async function cascadeDeleteForUserIds(userIds: Types.ObjectId[]): Promise<void>
   await Promise.all([
     Property.deleteMany({ createdBy: { $in: userIds } }),
     Lead.deleteMany({ agent: { $in: userIds } }),
+    PropertyEvent.deleteMany({ agent: { $in: userIds } }),
   ]);
 }
 

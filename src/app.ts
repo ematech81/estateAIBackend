@@ -7,7 +7,7 @@ import { ApiError } from './utils/ApiError';
 import { authRouter } from './modules/auth/auth.routes';
 import { listingRouter } from './modules/listings/listing.routes';
 import { userRouter } from './modules/users/user.routes';
-import { leadRouter } from './modules/leads/lead.routes';
+import { eventRouter } from './modules/events/event.routes';
 import { uploadRouter } from './modules/uploads/upload.routes';
 import { analyticsRouter } from './modules/analytics/analytics.routes';
 import { blogRouter } from './modules/blog/blog.routes';
@@ -52,7 +52,7 @@ export function createApp(): Express {
   app.use('/api/auth', authRouter);
   app.use('/api/listings', listingRouter);
   app.use('/api/users', userRouter);
-  app.use('/api/leads', leadRouter);
+  app.use('/api/events', eventRouter);
   app.use('/api/uploads', uploadRouter);
   app.use('/api/analytics', analyticsRouter);
   app.use('/api/blog', blogRouter);

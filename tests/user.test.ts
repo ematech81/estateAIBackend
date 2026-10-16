@@ -3,7 +3,7 @@ import { createApp } from '../src/app';
 import { startTestDB, stopTestDB, clearTestDB } from './helpers/testDb';
 import { User } from '../src/models/User';
 import { Property } from '../src/models/Property';
-import { Lead } from '../src/models/Lead';
+import { PropertyEvent } from '../src/models/PropertyEvent';
 
 const app = createApp();
 
@@ -124,7 +124,7 @@ describe('DELETE /api/users/me', () => {
     expect(res.status).toBe(401);
   });
 
-  it('deletes the account and cascades its listings and leads', async () => {
+  it('deletes the account and cascades its listings and visitor events', async () => {
     const validListingPayload = {
       title: 'Newly built 3 bedroom duplex, Lekki Phase 1',
       description: 'Newly built 3 bedroom duplex at Lekki Phase 1, ₦8 million per year with BQ and pool.',
@@ -143,15 +143,15 @@ describe('DELETE /api/users/me', () => {
       .set('Authorization', `Bearer ${token}`)
       .send(validListingPayload);
     await request(app)
-      .post('/api/leads')
-      .send({ propertyId: listingRes.body.listing._id, name: 'Seeker', email: 'seeker@example.com' });
+      .post('/api/events')
+      .send({ propertyId: listingRes.body.listing._id, type: 'view', visitorId: 'visitor-aaaa-1' });
 
     const res = await request(app).delete('/api/users/me').set('Authorization', `Bearer ${token}`);
 
     expect(res.status).toBe(204);
     expect(await User.findById(userId)).toBeNull();
     expect(await Property.countDocuments({ createdBy: userId })).toBe(0);
-    expect(await Lead.countDocuments({ agent: userId })).toBe(0);
+    expect(await PropertyEvent.countDocuments({ agent: userId })).toBe(0);
   });
 });
 
@@ -169,7 +169,7 @@ describe('User deletion cascade (models/User.ts middleware)', () => {
     specifications: { bedrooms: 3, bathrooms: 4, amenities: ['BQ', 'swimming pool'] },
   };
 
-  it('findByIdAndDelete removes the user’s listings and leads too', async () => {
+  it('findByIdAndDelete removes the user’s listings and visitor events too', async () => {
     const token = await registerAndLogin();
     const meRes = await request(app).get('/api/users/me').set('Authorization', `Bearer ${token}`);
     const userId = meRes.body.user.id;
@@ -181,17 +181,17 @@ describe('User deletion cascade (models/User.ts middleware)', () => {
     const listingId = listingRes.body.listing._id;
 
     await request(app)
-      .post('/api/leads')
-      .send({ propertyId: listingId, name: 'Seeker', email: 'seeker@example.com' });
+      .post('/api/events')
+      .send({ propertyId: listingId, type: 'view', visitorId: 'visitor-aaaa-1' });
 
     expect(await Property.countDocuments({ createdBy: userId })).toBe(1);
-    expect(await Lead.countDocuments({ agent: userId })).toBe(1);
+    expect(await PropertyEvent.countDocuments({ agent: userId })).toBe(1);
 
     await User.findByIdAndDelete(userId);
 
     expect(await User.findById(userId)).toBeNull();
     expect(await Property.countDocuments({ createdBy: userId })).toBe(0);
-    expect(await Lead.countDocuments({ agent: userId })).toBe(0);
+    expect(await PropertyEvent.countDocuments({ agent: userId })).toBe(0);
   });
 
   it('does not touch another user’s listings', async () => {

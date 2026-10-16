@@ -7,7 +7,7 @@ const BREVO_SEND_URL = 'https://api.brevo.com/v3/smtp/email';
 // No rate-limiting/spam protection on the endpoints that trigger these yet
 // (see auth.routes.ts's /forgot-password, /register, /resend-verification)
 // — flagging as a known gap, not silently skipping it. Same convention as
-// leads.service.ts's public lead-capture endpoint.
+// a (now removed) public lead-capture endpoint.
 async function sendTransactionalEmail(toEmail: string, toName: string, subject: string, htmlContent: string): Promise<void> {
   if (!env.BREVO_API_KEY || !env.BREVO_SENDER_EMAIL) {
     throw new Error('Email sending is not configured (BREVO_API_KEY / BREVO_SENDER_EMAIL missing)');
