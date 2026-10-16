@@ -10,9 +10,11 @@ import {
   getListingContact,
   getMyListings,
   searchListings,
+  setListingAvailability,
   updateListing,
 } from './listing.service';
 import {
+  availabilitySchema,
   createListingSchema,
   draftRequestSchema,
   searchListingsSchema,
@@ -71,5 +73,12 @@ export const update = asyncHandler(async (req: Request, res: Response) => {
   if (!req.user) throw ApiError.unauthorized();
   const input = updateListingSchema.parse(req.body);
   const listing = await updateListing(req.user.sub, req.params.id, input);
+  res.status(200).json({ listing });
+});
+
+export const setAvailability = asyncHandler(async (req: Request, res: Response) => {
+  if (!req.user) throw ApiError.unauthorized();
+  const input = availabilitySchema.parse(req.body);
+  const listing = await setListingAvailability(req.user.sub, req.params.id, input);
   res.status(200).json({ listing });
 });

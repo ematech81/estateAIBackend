@@ -96,3 +96,11 @@ export const searchListingsSchema = z.object({
     .optional(),
 });
 export type SearchListingsInput = z.infer<typeof searchListingsSchema>;
+
+// Take a listing off the market (hidden from the public, kept in the agent's
+// dashboard) or put it back. `reason` only applies when available is false.
+export const availabilitySchema = z.object({
+  available: z.boolean(),
+  reason: z.enum(['sold', 'rented', 'withdrawn']).default('withdrawn'),
+});
+export type AvailabilityInput = z.infer<typeof availabilitySchema>;

@@ -561,3 +561,82 @@ describe('POST /api/listings/:id/contact', () => {
     expect((await request(app).post('/api/listings/64b64b64b64b64b64b64b64b/contact').send({})).status).toBe(400);
   });
 });
+
+describe('PATCH /api/listings/:id/availability', () => {
+  const payload = (listingType: string, period: string) => ({
+    title: 'Newly built 3 bedroom duplex, Lekki Phase 1',
+    description: 'Newly built 3 bedroom duplex at Lekki Phase 1 with BQ and parking.',
+    listingType,
+    propertyType: 'duplex',
+    price: { amount: 8_000_000, currency: 'NGN', period },
+    location: { country: 'Nigeria', state: 'Lagos', city: 'Lagos', district: 'Lekki Phase 1' },
+    specifications: { bedrooms: 3, amenities: [] },
+  });
+
+  async function setup(listingType = 'sale', period = 'one_time', email = 'agent@example.com') {
+    const token = await registerAndLogin(email);
+    const res = await request(app).post('/api/listings').set('Authorization', `Bearer ${token}`).send(payload(listingType, period));
+    return { token, id: res.body.listing._id as string };
+  }
+  const patch = (id: string, token: string, body: object) =>
+    request(app).patch(`/api/listings/${id}/availability`).set('Authorization', `Bearer ${token}`).send(body);
+
+  it('requires auth', async () => {
+    const { id } = await setup();
+    expect((await request(app).patch(`/api/listings/${id}/availability`).send({ available: false })).status).toBe(401);
+  });
+
+  it('hides a sold listing from the public but keeps it in the owner’s listings, and can restore it', async () => {
+    const { token, id } = await setup('sale');
+
+    const sold = await patch(id, token, { available: false, reason: 'sold' });
+    expect(sold.status).toBe(200);
+    expect(sold.body.listing).toMatchObject({ status: 'inactive', unavailableReason: 'sold' });
+
+    expect((await request(app).get(`/api/listings/${id}`)).status).toBe(404);
+    expect((await request(app).post(`/api/listings/${id}/contact`).send({ visitorId: 'visitor-abc-123' })).status).toBe(404);
+    const search = await request(app).get('/api/listings');
+    expect(search.body.listings).toHaveLength(0);
+
+    const mine = await request(app).get('/api/listings/mine').set('Authorization', `Bearer ${token}`);
+    expect(mine.body.listings).toHaveLength(1);
+    expect(mine.body.listings[0].status).toBe('inactive');
+
+    const back = await patch(id, token, { available: true });
+    expect(back.body.listing.status).toBe('active');
+    expect(back.body.listing.unavailableReason).toBeUndefined();
+    expect((await request(app).get(`/api/listings/${id}`)).status).toBe(200);
+  });
+
+  it('defaults to "withdrawn" when no reason is given', async () => {
+    const { token, id } = await setup();
+    const res = await patch(id, token, { available: false });
+    expect(res.body.listing.unavailableReason).toBe('withdrawn');
+  });
+
+  it('only allows "sold" for sale listings and "rented" for rent/shortlet', async () => {
+    const sale = await setup('sale', 'one_time', 'a@example.com');
+    expect((await patch(sale.id, sale.token, { available: false, reason: 'rented' })).status).toBe(400);
+
+    const rent = await setup('rent', 'yearly', 'b@example.com');
+    expect((await patch(rent.id, rent.token, { available: false, reason: 'sold' })).status).toBe(400);
+    expect((await patch(rent.id, rent.token, { available: false, reason: 'rented' })).status).toBe(200);
+  });
+
+  it('rejects another agent and unknown listings', async () => {
+    const { id } = await setup();
+    const other = await registerAndLogin('other@example.com');
+    expect((await patch(id, other, { available: false })).status).toBe(403);
+    expect((await patch('64b64b64b64b64b64b64b64b', other, { available: false })).status).toBe(404);
+    expect((await patch('not-an-id', other, { available: false })).status).toBe(404);
+  });
+
+  it('keeps the listing’s visitor stats in the performance report after it is marked unavailable', async () => {
+    const { token, id } = await setup();
+    await request(app).post('/api/events').send({ propertyId: id, type: 'view', visitorId: 'visitor-aaaa-1' });
+    await patch(id, token, { available: false, reason: 'sold' });
+
+    const res = await request(app).get('/api/analytics/performance').set('Authorization', `Bearer ${token}`);
+    expect(res.body.listings[0]).toMatchObject({ id, status: 'inactive', views: 1 });
+  });
+});

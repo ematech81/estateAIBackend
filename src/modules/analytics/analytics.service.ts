@@ -53,7 +53,7 @@ export async function getMyPerformance(userId: string, days: number) {
   const match = { agent: agentId, createdAt: { $gte: since } };
 
   const [listings, perListingRows, uniqueVisitorRows, dailyRows] = await Promise.all([
-    Property.find({ createdBy: agentId }).select('title status location.city'),
+    Property.find({ createdBy: agentId }).select('title status unavailableReason location.city'),
     // Two-stage group so "unique visitors" is a count, not an ever-growing
     // array of ids held in memory.
     PropertyEvent.aggregate<{
@@ -97,6 +97,7 @@ export async function getMyPerformance(userId: string, days: number) {
       title: l.title,
       city: l.location.city,
       status: l.status,
+      unavailableReason: l.unavailableReason,
       ...(stats.get(l._id.toString()) ?? EMPTY_STATS),
     }))
     .sort((a, b) => b.views - a.views || b.contactReveals - a.contactReveals);

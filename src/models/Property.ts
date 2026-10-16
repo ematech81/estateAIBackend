@@ -19,6 +19,11 @@ export type PropertyType =
   | 'commercial'
   | 'other';
 export type PropertyStatus = 'draft' | 'pending_review' | 'active' | 'inactive';
+// Why a listing was taken off the market (status 'inactive'). Kept on the
+// record — rather than deleting the listing — so agents retain their history
+// and analytics for properties that are sold/rented/withdrawn.
+export type UnavailableReason = 'sold' | 'rented' | 'withdrawn';
+export const UNAVAILABLE_REASONS: UnavailableReason[] = ['sold', 'rented', 'withdrawn'];
 export type PricePeriod = 'yearly' | 'monthly' | 'one_time' | 'nightly';
 
 export interface IPropertyPrice {
@@ -53,6 +58,8 @@ export interface IProperty extends Document {
   listingType: ListingType;
   propertyType: PropertyType;
   status: PropertyStatus;
+  unavailableReason?: UnavailableReason;
+  unavailableAt?: Date;
   price: IPropertyPrice;
   location: IPropertyLocation;
   specifications: IPropertySpecifications;
@@ -123,6 +130,8 @@ const propertySchema = new Schema<IProperty>(
       enum: ['draft', 'pending_review', 'active', 'inactive'],
       default: 'pending_review',
     },
+    unavailableReason: { type: String, enum: UNAVAILABLE_REASONS },
+    unavailableAt: { type: Date },
     price: { type: priceSchema, required: true },
     location: { type: locationSchema, required: true },
     specifications: { type: specificationsSchema, required: true, default: () => ({ amenities: [] }) },

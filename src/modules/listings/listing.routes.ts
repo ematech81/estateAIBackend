@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { optionalAuth, requireAuth } from '../../middleware/auth.middleware';
-import { create, generateDraft, getById, getContact, listMine, search, update } from './listing.controller';
+import { create, generateDraft, getById, getContact, listMine, search, setAvailability, update } from './listing.controller';
 
 export const listingRouter = Router();
 
@@ -15,3 +15,4 @@ listingRouter.post('/:id/contact', optionalAuth, getContact);
 listingRouter.post('/draft', requireAuth, generateDraft);
 listingRouter.post('/', requireAuth, create);
 listingRouter.patch('/:id', requireAuth, update);
+listingRouter.patch('/:id/availability', requireAuth, setAvailability);

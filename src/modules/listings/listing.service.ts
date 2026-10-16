@@ -5,7 +5,7 @@ import { ApiError } from '../../utils/ApiError';
 import { PLANS, PlanTier } from '../../config/plans';
 import { getEffectivePlanTier } from '../../services/plans/plan.service';
 import { notifyNewListingIfPremium } from '../payments/payment.service';
-import { CreateListingInput, SearchListingsInput, UpdateListingInput } from './listing.validation';
+import { AvailabilityInput, CreateListingInput, SearchListingsInput, UpdateListingInput } from './listing.validation';
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -240,6 +240,45 @@ export async function updateListing(userId: string, listingId: string, input: Up
   }
 
   Object.assign(listing, input);
+  await listing.save();
+  return listing;
+}
+
+// Marks a listing sold/rented/withdrawn (hiding it from every public query,
+// which only ever return pending_review/active) or restores it. The record,
+// its photos and its visitor stats all stay in the owner's dashboard.
+export async function setListingAvailability(userId: string, listingId: string, { available, reason }: AvailabilityInput) {
+  if (!isValidObjectId(listingId)) {
+    throw ApiError.notFound('Listing not found');
+  }
+  const listing = await Property.findById(listingId);
+  if (!listing) {
+    throw ApiError.notFound('Listing not found');
+  }
+  if (listing.createdBy.toString() !== userId) {
+    throw ApiError.forbidden('You do not have access to this listing');
+  }
+  if (listing.status === 'draft') {
+    throw ApiError.badRequest('Drafts are not published, so they cannot be marked available or unavailable');
+  }
+
+  if (available) {
+    listing.status = 'active';
+    listing.unavailableReason = undefined;
+    listing.unavailableAt = undefined;
+  } else {
+    // "Sold" only makes sense for a sale; "rented" only for rent/shortlet.
+    if (reason === 'sold' && listing.listingType !== 'sale') {
+      throw ApiError.badRequest('Only a property listed for sale can be marked as sold');
+    }
+    if (reason === 'rented' && listing.listingType === 'sale') {
+      throw ApiError.badRequest('A property listed for sale cannot be marked as rented');
+    }
+    listing.status = 'inactive';
+    listing.unavailableReason = reason;
+    listing.unavailableAt = new Date();
+  }
+
   await listing.save();
   return listing;
 }
