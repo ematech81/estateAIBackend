@@ -9,13 +9,16 @@ const envSchema = z.object({
   MONGODB_URI: z.string().min(1, 'MONGODB_URI is required'),
   JWT_SECRET: z.string().min(1, 'JWT_SECRET is required'),
   JWT_EXPIRES_IN: z.string().default('7d'),
-  ANTHROPIC_API_KEY: z.string().optional(),
-  AI_MODEL: z.string().default('claude-sonnet-5'),
+  // OpenAI — AI-assisted listing extraction. Optional (lazy-fail, like the
+  // other third-party keys): the app boots without it and the draft
+  // endpoint returns a clear "not configured" error until it's set.
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_MODEL: z.string().default('gpt-4o-mini'),
   WEB_ORIGIN: z.string().default('http://localhost:3000'),
   // The admin dashboard's origin (separate app). Optional — only needed in
   // production, where CORS is locked to the listed origins.
   ADMIN_ORIGIN: z.string().optional(),
-  // Optional, same lazy-fail convention as ANTHROPIC_API_KEY — app still
+  // Optional, same lazy-fail convention as OPENAI_API_KEY — app still
   // boots without these; the upload service throws a clear error only if
   // actually invoked unconfigured.
   CLOUDINARY_CLOUD_NAME: z.string().optional(),

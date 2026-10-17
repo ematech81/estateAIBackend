@@ -7,7 +7,7 @@ import { startTestDB, stopTestDB, clearTestDB } from './helpers/testDb';
 // module-level state that, once set, stays set for the rest of that
 // module's lifetime. Jest gives each test file its own fresh module
 // registry, so this is the one place the real (unconfigured, per
-// tests/setup.ts blanking ANTHROPIC_API_KEY) AnthropicProvider
+// tests/setup.ts blanking OPENAI_API_KEY) OpenAIProvider
 // construction path actually gets exercised.
 const app = createApp();
 

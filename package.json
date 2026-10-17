@@ -16,7 +16,6 @@
     "promote:admin": "ts-node scripts/promoteToAdmin.ts"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.32.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",

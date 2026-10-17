@@ -1,7 +1,11 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { env } from '../../config/env';
 import { ApiError } from '../../utils/ApiError';
 import { AIProvider, ListingDraft, listingDraftSchema } from './AIProvider';
+
+// OpenAI's Chat Completions HTTP API — one endpoint, no SDK needed (same
+// approach as the Brevo email service).
+// https://platform.openai.com/docs/api-reference/chat/create
+const OPENAI_CHAT_URL = 'https://api.openai.com/v1/chat/completions';
 
 const SYSTEM_PROMPT = `You extract structured real-estate listing data from a Nigerian agent's free-text description.
 
@@ -22,39 +26,66 @@ Rules (do not break these):
   "specifications": { "bedrooms": number | null, "bathrooms": number | null, "sizeSqm": number | null, "amenities": string[] }
 }`;
 
-export class AnthropicProvider implements AIProvider {
-  private readonly client: Anthropic;
+interface ChatCompletionResponse {
+  choices?: { message?: { content?: string | null }; finish_reason?: string }[];
+}
+
+export class OpenAIProvider implements AIProvider {
+  private readonly apiKey: string;
   private readonly model: string;
 
-  constructor(apiKey: string = env.ANTHROPIC_API_KEY ?? '', model: string = env.AI_MODEL) {
+  constructor(apiKey: string = env.OPENAI_API_KEY ?? '', model: string = env.OPENAI_MODEL) {
     if (!apiKey) {
       // ApiError (not a plain Error) so this specific, safe-to-show message
       // survives the global error handler — same reasoning and same
-      // pattern as upload.service.ts's Cloudinary check. A plain Error
-      // here would now be swallowed into the generic "something went
-      // wrong" message along with every other unanticipated failure.
+      // pattern as upload.service.ts's Cloudinary check.
       throw new ApiError(500, 'AI-assisted listing extraction is not configured on the server yet');
     }
-    this.client = new Anthropic({ apiKey });
+    this.apiKey = apiKey;
     this.model = model;
   }
 
   async extractListingDraft(rawText: string): Promise<ListingDraft> {
-    const response = await this.client.messages.create({
-      model: this.model,
-      max_tokens: 1024,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: rawText }],
-    });
+    let res: Response;
+    try {
+      res = await fetch(OPENAI_CHAT_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
+        body: JSON.stringify({
+          model: this.model,
+          // JSON mode: the model is constrained to emit a single valid JSON
+          // object (the system prompt spells out the shape). Deliberately no
+          // temperature / token-limit params — newer model families reject
+          // them, and the output is re-validated below regardless.
+          response_format: { type: 'json_object' },
+          messages: [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: rawText },
+          ],
+        }),
+      });
+    } catch (err) {
+      console.error('OpenAI request failed (network):', err);
+      throw new ApiError(502, 'The AI assistant is temporarily unavailable. Please try again, or fill the form in yourself.');
+    }
 
-    const block = response.content.find((c) => c.type === 'text');
-    if (!block || block.type !== 'text') {
+    if (!res.ok) {
+      // The details (bad key, no credit, rate limit, wrong model name…) are
+      // for the server logs only — never echoed to the client.
+      const detail = await res.text().catch(() => '');
+      console.error(`OpenAI request failed (${res.status}): ${detail}`);
+      throw new ApiError(502, 'The AI assistant is temporarily unavailable. Please try again, or fill the form in yourself.');
+    }
+
+    const body = (await res.json()) as ChatCompletionResponse;
+    const content = body.choices?.[0]?.message?.content;
+    if (!content) {
       throw new Error('AI provider returned no text content');
     }
 
     let parsedJson: unknown;
     try {
-      parsedJson = JSON.parse(block.text);
+      parsedJson = JSON.parse(content);
     } catch {
       throw new Error('AI provider returned invalid JSON');
     }

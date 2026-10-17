@@ -7,7 +7,7 @@ import * as emailService from '../src/services/email/email.service';
 
 // Mocked so these tests never hit the real Brevo API (or depend on the
 // real BREVO_API_KEY in a developer's .env, which tests/setup.ts blanks
-// out anyway) — same idea as setAIProvider() for the Anthropic provider.
+// out anyway) — same idea as setAIProvider() for the AI provider.
 jest.mock('../src/services/email/email.service');
 const mockedSendPasswordResetEmail = emailService.sendPasswordResetEmail as jest.MockedFunction<
   typeof emailService.sendPasswordResetEmail

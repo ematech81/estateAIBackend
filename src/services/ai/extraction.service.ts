@@ -1,16 +1,16 @@
 import { AIProvider, ListingDraft } from './AIProvider';
-import { AnthropicProvider } from './AnthropicProvider';
+import { OpenAIProvider } from './OpenAIProvider';
 
 let provider: AIProvider | undefined;
 
 /**
  * Lazily constructs the configured AIProvider on first use, so the app can
- * boot (and non-AI tests can run) without ANTHROPIC_API_KEY set. Swapping
+ * boot (and non-AI tests can run) without OPENAI_API_KEY set. Swapping
  * providers later means changing this one function, nothing that calls it.
  */
 function getProvider(): AIProvider {
   if (!provider) {
-    provider = new AnthropicProvider();
+    provider = new OpenAIProvider();
   }
   return provider;
 }
