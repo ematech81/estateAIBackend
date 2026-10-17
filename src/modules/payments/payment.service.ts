@@ -69,7 +69,7 @@ export async function initiateCheckout(
         currency: 'NGN',
         reference,
         customer: { email: user.email, name: user.name },
-        redirect_url: `${env.WEB_ORIGIN}/agent/upgrade?reference=${reference}`,
+        redirect_url: `${env.WEB_URL}/agent/upgrade?reference=${reference}`,
       }),
     });
 
@@ -161,7 +161,7 @@ export async function notifyNewListingIfPremium(
   if (getEffectivePlanTier(poster) !== 'premium') return;
 
   const recipients = await User.find({ emailMarketingOptIn: true, _id: { $ne: posterId } }).select('email name');
-  const listingUrl = `${env.WEB_ORIGIN}/properties/${property._id}`;
+  const listingUrl = `${env.WEB_URL}/properties/${property._id}`;
 
   for (const recipient of recipients) {
     try {

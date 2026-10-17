@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import { env } from './config/env';
+import { parseOrigins } from './config/origins';
 import { ApiError } from './utils/ApiError';
 import { authRouter } from './modules/auth/auth.routes';
 import { listingRouter } from './modules/listings/listing.routes';
@@ -26,10 +27,7 @@ import { errorHandler, notFoundHandler } from './middleware/error.middleware';
 // security decision.
 const corsOrigin: cors.CorsOptions['origin'] =
   env.NODE_ENV === 'production'
-    ? [env.WEB_ORIGIN, env.ADMIN_ORIGIN ?? '']
-        .flatMap((o) => o.split(','))
-        .map((o) => o.trim())
-        .filter(Boolean)
+    ? parseOrigins(env.WEB_ORIGIN, env.ADMIN_ORIGIN)
     : (origin, callback) => {
         if (!origin || /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin)) {
           callback(null, true);

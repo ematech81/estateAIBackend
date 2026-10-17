@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
+import { parseOrigins } from './origins';
 
 dotenv.config();
 
@@ -14,6 +15,8 @@ const envSchema = z.object({
   // endpoint returns a clear "not configured" error until it's set.
   OPENAI_API_KEY: z.string().optional(),
   OPENAI_MODEL: z.string().default('gpt-4o-mini'),
+  // The public site's address. May be a comma-separated list; the FIRST is
+  // the main site (used in generated links), the rest are also allowed by CORS.
   WEB_ORIGIN: z.string().default('http://localhost:3000'),
   // The admin dashboard's origin (separate app). Optional — only needed in
   // production, where CORS is locked to the listed origins.
@@ -55,7 +58,13 @@ function loadEnv() {
     console.error('Invalid environment configuration:', parsed.error.flatten().fieldErrors);
     throw new Error('Invalid environment configuration');
   }
-  return parsed.data;
+  return {
+    ...parsed.data,
+    // WEB_ORIGIN may list several addresses (CORS allows all of them), but
+    // links we generate — password-reset emails, the payment return page,
+    // listing URLs — must use ONE: the first entry is the main site.
+    WEB_URL: parseOrigins(parsed.data.WEB_ORIGIN)[0] ?? 'http://localhost:3000',
+  };
 }
 
 export const env = loadEnv();

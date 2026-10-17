@@ -184,7 +184,7 @@ export async function requestPasswordReset(email: string): Promise<void> {
     expiresAt: new Date(Date.now() + RESET_TOKEN_TTL_MS),
   });
 
-  const resetUrl = `${env.WEB_ORIGIN}/reset-password?token=${rawToken}`;
+  const resetUrl = `${env.WEB_URL}/reset-password?token=${rawToken}`;
   await sendPasswordResetEmail(user.email, user.name, resetUrl);
 }
 
